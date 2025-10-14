@@ -11,12 +11,24 @@ DirectXTex DirectXMesh DirectXMath
 培训视频内容
 202404070943视频主要讲了团队组成 引擎功能效果 案例分享
 
+GIS数据文件格式
+
+贴图数据文件格式
+贴图制作工具
+
+photoshop文件格式
+psd
+psb
+dds
+gif iff dcm pxr  tiff 
+
 # 3d 工具
 1. UE 使用，蓝图，关卡 材质 动画编辑器
 2. blender使用
 3. Maya 3dMax使用
 4. gis相关工具的学习使用
 5. 数字孪生
+6. substance painter 制作pbr贴图
 
 # CG理论
 1. pbrt v3 v4
