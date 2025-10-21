@@ -281,6 +281,8 @@ UV展开算法的发展，核心是如何更好地最小化映射失真。
 
 2. 自动展开算法
 
+![alt text](blender中展开的算法.png)
+
 这类算法旨在最小化人工干预，自动寻找最优的接缝和映射。
 
 a. 基于信号处理的方法：
@@ -432,6 +434,18 @@ Iso-charts 算法的目标就是自动化这个过程，并力求在数学上达
 Iso-charts 是UV展开领域的一个里程碑式的算法。它将一个复杂的几何问题（最小化扭曲参数化）与一个图形学问题（分割）巧妙地结合起来，通过谱方法 或测地距离场 来指导分割，从而实现了高质量的全自动UV展开。
 
 虽然它不能完全替代艺术家对于重要资产（如主角角色）的手动精细展开，但它是处理大量资产、快速原型设计以及为手动展开提供优秀起点的强大工具。理解了 Iso-charts，你就掌握了现代自动UV展开技术的核心思想。
+
+## 过程纹理 纹理烘焙
+过程纹理是程序化生成的，如噪声、渐变、波形、数学运算等，无限分辨率，无缝平铺
+
+http://wiki.polycount.com/wiki/Texture_Baking
+Texture baking is the process of transferring details from one model to another.将三维模型上复杂的、实时计算的信息（如光影、细节、材质属性）“预计算”并保存为一张或多张二维纹理贴图的过程
+
+The baking tool starts a certain distance out from the model (usually a low-resolution model for game use), and casts rays inwards towards another model (usually a high-resolution sculpt). When a ray intersects the 2nd model, it records the surface detail and saves that into a texture map, using the first model's Texture Coordinates.
+
+Baking tools support multiple map types. High-resolution normals go into a Normal map, occlusion goes into an Ambient occlusion map, etc.
+
+低模紧密包裹高模，从低模向内部的高模投射光线，光线打到高模时记录表面细节，保存到纹理贴图中，使用低模的纹理坐标。实现的技术应该就是Render To Texture
 
 # UVAtlas 
 是对uv展开中的基于信号处理的自动化展开算法的一个经典实现
@@ -590,3 +604,4 @@ Compress:Block Compression BC1/2/3/4/5/6/7
 -   **工作流集成**：考虑工具与你主要使用的3D软件（如Maya、3ds Max、Blender、Unity、Unreal Engine）的兼容性。例如，Substance工具与Unreal Engine和Unity的集成非常紧密。
 
 希望这份工具指南能帮助你找到最适合你项目的利器！如果你能分享一下你主要从事的领域（比如是游戏角色制作、场景环境艺术，还是产品可视化），或许我可以给出更具体的流程建议。
+
