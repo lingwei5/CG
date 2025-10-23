@@ -545,9 +545,119 @@ mipmapping
 10. PPM (Portable Pixmap)
 11. EXR 工业光魔设计的一种半精度浮点的HDR文件格式 支持piz zip rle 等压缩方式 EXR（或OpenEXR）、工业光魔（ILM）和ASWF（Academy Software Foundation）三者之间，其实是一段关于​​电影工业中开源技术如何从解决特定问题走向行业标准，并通过基金会协作推动整个生态繁荣的精彩故事​​。ILM开发了exr并开源了OpenEXR，交给了ASWF基金管理
 
+## 可视化工具
+https://github.com/Tom94/tev 依赖了很多三方软件实现各种格式的读写
+File Formats
+    EXR (via OpenEXR)
+    Ultra HDR JPEG (e.g. pictures from newer Android phones; via libultrahdr)
+    JPEG XL (via libjxl. Shoutout to Johnathon Selstad for adding support!)
+    Supports both lossy and lossless compression with full HDR capabilities
+    JPEG (via libjpeg-turbo)
+    PNG, APNG (via libpng)
+    PFM (compatible with Netbpm)
+    QOI (via qoi. Shoutout to Tiago Chaves for adding support!)
+    DDS (via DirectXTex; Windows only. Shoutout to Craig Kolb for adding support!)
+    Supports BC1-BC7 compressed formats.
+    WEBP (via libwebp)
+    TIFF, DNG (via libtiff; only some DNG files supported)
+    AVIF (via aom+libheif)
+    HEIC (e.g. pictures from iPhones; via libde265+libheif; disabled in binary release. You must build tev yourself with the TEV_SUPPORT_HEIC CMake option. Check patent laws in your jurisdiction before enabling this feature.)
+    HDR, BMP, GIF, PIC, PNM, PSD, TGA (via stb_image)
+
 ## 纹理压缩算法及格式
-ASTC
-DXTC1234567
+主要参考paper TextureCompressionTechniques
+普通图像压缩算法：RLE, LZW, Deflate
+popular image compression format:jpeg png tiff
+
+普通压缩算法无法实现random access texel，也就无法只解压缩一个texel而不用解压缩整个纹理
+
+多数纹理压缩方案都是把整个纹理分成若干个固定尺寸的block(称为tile)，每个block单独压缩；PVRTC是个例外
+纹理压缩算法评估时，需要考虑以下因素：
+1. random access，GPU需要高效的随机访问任意texel，一般所有的压缩器都有一个fixed compression rate
+2. 高压缩率：压缩后的纹理大小与原始纹理大小的比值。带宽能节省多少的决定因素 The compression ratio is usually expressed in either the bit rate or the average number of bits per texel (bpp)
+3. 高解压速度：解压纹理所需的时间。
+4. 压缩速度：压缩纹理所需的时间。
+5. 可接受的纹理质量：压缩后的纹理与原始纹理之间的视觉差异。
+6. 兼容性：纹理压缩格式是否被广泛支持。
+
+### 重要的前期工作
+这个是纹理压缩的基础，帮助理解纹理压缩
+调色板索引压缩算法
+Block Truncating Coding (BTC)压缩灰度图 4x4 block, 16个像素，每个像素8bits，压缩前共16*8=128bits；压缩后保留两个代表值，每个代表值8bits，2*8=16bits，另外还有一个4x4的bitmap，每个1bit，共16bits，所以压缩后共2*8 + 16 = 32bits；所以压缩率为128/32=8，bit rate是32bits/16pixels=2bpp
+Color Cell Compression (CCC) BTC的改进版，支持彩色图
+
+### S3TC Family
+s3tc是工业标准，均使用4x4block
+- 微软引进s3tc,命名DXT1，并改进了带alpha通道的DXT2~DXT5,都称之为DXTC，Opengl支持EXT_texture_compression_dxt1及EXT_texture_compression_s3tc
+- 从DX10开始，这些格式重命名为BC1~BC3，Block Compression,并新增BC4 BC5支持法线纹理压缩，OpenGL对应扩展是EXT_texture_compression_rgtc,  ARB_texture_compression_rgtc and EXT_texture_compression_latc
+- DX11新增BC6H(针对HDR)和BC7(高压缩率)，OpenGL对应扩展是ARB_texture_compression_bptc
+
+1. BC1(s3tc/dxt1)
+    两个16bit的代表色c0 c1,两个线性blend的c2 c3，共4种颜色，bitmap需要2bit来索引这个局部的四色调色板，4x4block，共16bit*2pixels+4*4*2bits=64bits，
+    ![alt text](DXT1.png)
+
+    ![alt text](<c2 c3的计算公式.png>)
+
+    两种block type:包含和不包含alpha
+
+*以下block布局图中左侧 多少bytes 指的是每一行的字节数*
+2. BC2(dxt2/dxt3) 
+   
+   BC1+直接编码的4-bit precision 的alpha部分，
+
+   占用4*4*4bits=64bits；![alt text](<BC2 block布局>) 
+   
+   DXT2是存储already premultiplied values in the color channels，DXT3是存储的没有premultiplied
+3. BC3(dxt4/dxt5) 
+   
+   BC1+压缩的alpha部分 对于alpha部分，
+   
+   使用与颜色部分相同的策略来处理。在block存储两个8bits的基准的alpha值，然后在其基础上插值得到其它6个共计8个alpha值，来做为alpha的调色板，![alt text](插值的6个alpha及其编码.png)；然后对于每个texel存储一个3bits的索引，用来指向到这8个alpha中的一个。
+   所以其对应的存储状态为：32bits：两个RGB565格式的基准颜色；32bits：16个2bits的颜色索引；48bits：16个3bits的alpha索引；16bits：2个8bits的基准alpha；
+   
+   ![alt text](<BC3 block布局.png>) 
+   
+   DXT4/DXT5的区别也是有没有premultiplied alpha
+
+4. BC4(ATI1/3Dc+) 
+   BC3的alpha部分，
+   用于单通道纹理，如a height map or a specular map 
+   ![alt text](<BC4 block布局.png>)，就是BC3的alpha部分
+5. BC5 Block (ATI2/3Dc) 
+   用于存储法线等纹理，两个BC4，一个存储X轴，一个存储Y轴，![alt text](<BC5 block布局.png>)
+
+上面的都是对BC1的扩展，存在的缺陷有:
+   1. RGB565的精度不够
+   2. 局部调色板尺寸固定为4，太小
+   3. 由于使用端点插值，压缩后每个block的颜色在RGB空间中都处于一条线上，对于原始block中颜色不在一条线上的情况效果较差
+
+6. BC6H and BC7 改进了BC1的缺陷，不支持alpha通道
+
+### ETC Family
+为移动设备设计，目前是Android的标准
+
+1. PACKMAN
+2. ETC1(iPACKMAN)
+3. ETC2
+4. EAC
+
+### PVRTC Family
+用于苹果设备 对应的OpenGL ES扩展 IMG_texture_compression_pvrtc (47), IMG_texture_compression_pvrtc2 (48) and EXT_pvrtc_sRGB
+![alt text](PVRTC的核心思想.png) 
+不是block codec，类似一种小波变换，整个图像被分成高频和低频信号，低频信号使用两张低分辨率的A B图像，高频信号使用全分辨率但低精度的调制信号，A、B upscale后，
+通过M作为blend weight插值A B图像，效果惊人
+
+PVRTC 4bpp, PVRTC 2bpp, PVRTC2 4bpp, PVRTC2 2bpp (or PVRTCII 2bpp/4bpp).
+
+### ASTC Format
+Adaptive Scalable Texture Compression
+ARM和AMD提出，Khronos维护，KHR_texture_compression_astc_hdr 
+- 支持1~4通道
+- 不相关通道质量也很高，适合normal及rgb
+- LDR HDR都支持
+- 跨平台 PVRTC is only available on the iOS platform, BC6H/BC7 is missing in mobile devices and ETC is not supported by desktop GPUs
+- bitrate灵活
+- 支持2D/3D纹理
 
 ## DirectXTex 纹理处理库
 DirectXTex 是微软开发的一套用于处理纹理的库，它提供了丰富的功能来加载、处理和保存纹理。DirectXTex 可以与 DirectX 11 和 DirectX 12 一起使用，并且支持多种纹理格式。
