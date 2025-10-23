@@ -3,6 +3,11 @@ blender manual: https://docs.blender.org/manual/en/latest/index.html 学习
 
 图标是个比较好的提示
 
+Photorealistic Materials and Textures in Blender Cycles - Fourth Edition
+The Complete Guide to Blender Graphics
+Blender script with python
+
+dream-textures是stable diffusion的blender插件https://github.com/carson-katri/dream-textures
 
 # User Interface
 window系统
@@ -46,6 +51,7 @@ UV Editing比layout下的editor功能更丰富
 
 
 # Scenes & Objects
+选中对象(橙色) 激活对象(最近一次选中的对象，黄色) ![alt text](Active&SelectedObject.png)
 ## Scenes
 ## Objects
 一个或多个Object构成一个Scene，
@@ -69,6 +75,12 @@ object type包括mesh curve surface text volume armature camera lamp speaker
 方便渲染，可以设置哪些object被渲染，哪些被忽略
 
 # Modeling
+blender里有四种模型表示方式
+1. mesh:explicit defined by vertices
+2. curve:explicit defined by control points 1d u坐标，nurbs 或者bezier
+3. surface:explicit defined by control points 2d u,v坐标，nurbs 或者bezier
+4. metaball:implicit defined by formulas
+
 ## Meshes
 ### Tools
 ### Selecting
@@ -117,12 +129,37 @@ image editor有view paint mask等mode
 
 
 # Grease Pencil
+油画笔
 
 # Animation & Rigging
 
 # Physics
 
 # Rendering
+
+纹理烘焙：离线提前制作好一些asset，在引擎里使用以提高效果效率，如高模法线烘焙贴到低模
+blender里烘焙的流程如下:
+选中需要进行烘焙的object，选中烘焙结果的导出目标(image texture node，不需要连接到任何节点，但需要有一张link的bitmap或生成的image,模型已经展uv到这张bitmap上)，选中烘焙类型(漫反射，法线，粗糙度，金属度等)点击bake
+Property Editor里的render属性下有bake功能，需要选择引擎 烘焙类型 观察位置等
+PBR贴图是实现真实感材质的关键，通常包括以下几种贴图：
+
+1.** 反照率（Albedo）贴图 **：记录物体的基础颜色，不包含光照和阴影信息。在Blender中，可通过烘焙"漫反射"类型并去除光照影响得到。
+
+2.** 法线（Normal）贴图 **：模拟物体表面的凹凸细节，使低模呈现高模的立体感。烘焙"法线"类型时，注意选择正确的空间（通常为" tangent "空间）。
+
+3.** 粗糙度（Roughness）贴图 **：控制物体表面的光滑程度，影响高光的大小和模糊程度。可通过烘焙高模的细节或手动绘制得到。
+
+4.** 金属度（Metallic）贴图 **：区分物体表面的金属和非金属区域，金属区域反射环境，非金属区域反射高光。
+
+5.** 环境光遮蔽（AO）贴图 **：模拟物体表面因自身遮挡产生的阴影，增强细节的层次感。
+
+这些贴图可以通过Blender的节点编辑器进行组合，创建PBR材质。例如，将法线贴图连接到Principled BSDF节点的"法线"输入，粗糙度和金属度贴图分别连接到对应的输入，即可实现基于物理的真实渲染效果。
+
+Blender的PBR材质节点设置可参考 scripts/addons_core/io_scene_gltf2/blender/imp/pbrMetallicRoughness.py 中的PBR材质导入代码。
+
+Open Shading Language
+
+烘焙单个物体 多个物体 场景的具体操作都不太一样
 
 ## 3个引擎
 3个引擎Cycles, Eevee, Workbench
@@ -142,7 +179,45 @@ Workbench is designed for layout, modeling and previews.
 ## Shader Nodes
 Materials, lights and backgrounds are all defined using a network of shading nodes. These nodes output values, vectors, colors and shaders
 
+color model:
+	RGB:红绿蓝
+	HSV:色相饱和度明度
+	HSL:色相亮度饱和度
+
+
+
+### Input
+### Output
+AOV Output Node:any output variables
+Material Output Node:材质表面输出
+Light Output Node:光源
+World Output Node:世界
+### Shader
+各种常见BSDF shader![alt text](BSDFs.png)
+### Texture
+各种常见纹理![alt text](常见纹理.png)
+### Color
+![alt text](颜色转换的一些shader.png)
+### Vector
+![alt text](法线贴图等非颜色vector的shader.png)
+### Converter
+![alt text](mix-math等一些node之间的转换shader.png) 多通道非颜色属性的分离、合并的转换等channel package
+### Scripte Node
+
 ## Color Management
+OpenColorIO用于管理颜色，包括颜色空间转换，颜色校正等
+![alt text](颜色管理配置.png)
+
+1. 显示设备
+   1. sRGB: Used by most displays.
+   2. Display P3: Used by most Apple devices.
+   3. Rec. 1886: Used by many older TVs.
+   4. Rec. 2020: Used for newer wide gamut HDR displays.
+2. view transform
+3. exposure 曝光，控制亮度 ![alt text](曝光作为指数控制亮度.png)
+4. gamma校正
+5. sequencer
+
 ## Freestyle
 ## Layers & Passes
 ## Render Output
@@ -181,6 +256,7 @@ blender 3渲2 用3d模型渲染2d手绘般的效果 npr非真实感渲染的一�
 
 
 # shortcut
+在 Edit->Preferences->Keymap里有各种快捷键
 1. 视角控制：
    1. 鼠标中键按住旋转
    2. shift+M 平移
