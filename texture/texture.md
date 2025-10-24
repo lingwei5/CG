@@ -565,6 +565,8 @@ File Formats
     HDR, BMP, GIF, PIC, PNM, PSD, TGA (via stb_image)
 
 ## 纹理压缩算法及格式
+
+一张普通纹理数据通过cpu或gpu硬件进行指定格式的压缩后可以驻留在cpu内存也可以保存成文件如某个bc2的dds文件，压缩后的数据通过glCompressedTexImage3D等函数从cpu内存上传到显存，减少显存带宽占用，提高渲染性能。cpu端不解压，在gpu里随机读取解压
 主要参考paper TextureCompressionTechniques
 普通图像压缩算法：RLE, LZW, Deflate
 popular image compression format:jpeg png tiff
@@ -631,7 +633,7 @@ s3tc是工业标准，均使用4x4block
    2. 局部调色板尺寸固定为4，太小
    3. 由于使用端点插值，压缩后每个block的颜色在RGB空间中都处于一条线上，对于原始block中颜色不在一条线上的情况效果较差
 
-6. BC6H and BC7 改进了BC1的缺陷，不支持alpha通道
+6. BC6H and BC7 改进了BC1的缺陷，不支持alpha通道 
 
 ### ETC Family
 为移动设备设计，目前是Android的标准
@@ -658,6 +660,20 @@ ARM和AMD提出，Khronos维护，KHR_texture_compression_astc_hdr
 - 跨平台 PVRTC is only available on the iOS platform, BC6H/BC7 is missing in mobile devices and ETC is not supported by desktop GPUs
 - bitrate灵活
 - 支持2D/3D纹理
+
+### 不同压缩格式的开源实现
+不同的纹理压缩格式需要不同的硬件来支持，但也可以使用软件实现，以下是一些开源实现，可以用来预生成纹理压缩文件
+https://github.com/BinomialLLC/crunch 多种纹理压缩格式，包括pvrtc
+https://github.com/knarkowicz/GPURealTimeBC6H BC6H实现
+https://github.com/Ericsson/ETCPACK.git etc
+https://github.com/ARM-software/astc-encoder ASTC encoder
+
+Real-Time-Dxt-Compression.pdf里列出了很多实现某些压缩格式的参考文献
+
+各大硬件厂商nvidia arm amd 高通等都有自己的技术blog讲实现
+Microsoft也有很多开发资料
+mesa也有实现
+
 
 ## DirectXTex 纹理处理库
 DirectXTex 是微软开发的一套用于处理纹理的库，它提供了丰富的功能来加载、处理和保存纹理。DirectXTex 可以与 DirectX 11 和 DirectX 12 一起使用，并且支持多种纹理格式。
