@@ -521,13 +521,65 @@ mipmapping
 这些概念在数学的许多领域都有重要应用，特别是在集合论、抽象代数和函数论中。理解这些概念对于深入理解数学结构和函数关系非常重要。
 
 # 纹理数据IO
+计算机中表示图像主要有两种方式：位图(raster image/grid image)和矢量图(vector image)。位图图像由像素组成，每个像素具有特定的颜色值。矢量图由数学公式和路径定义，可以无限放大而不失真。
+在数字图像处理和计算机图形学中，矢量图形和光栅图形是两种基本的图像表示方法。它们各自具有独特的特性和适用场景。以下是这两种图形类型的详细对比：
+
+一、定义及原理
+矢量图形
+
+定义：矢量图形是基于数学方程或几何形状（如点、线、曲线和多边形）来表示的图像。
+原理：通过存储这些形状的坐标、颜色和其他属性来构建图像。当需要调整大小、旋转或缩放时，计算机会重新计算这些数学方程以生成新的图像，从而保持图像的清晰度和细节。
+光栅图形
+
+定义：光栅图形（也称为位图或像素图）是由许多细小的点（称为像素）组成的图像。
+原理：每个像素都有其特定的颜色和亮度值。当放大或缩小光栅图形时，可能会看到像素的网格结构，导致图像质量下降（例如模糊或锯齿状边缘）。
+
+二、特性比较
+分辨率
+
+矢量图形：不受分辨率限制，可以无限放大而不损失清晰度。
+光栅图形：受分辨率限制，放大后会显示像素化效果。
+
+文件大小
+
+矢量图形：通常较小，因为只存储了形状的数学描述。
+光栅图形：文件大小取决于图像的尺寸和分辨率，高分辨率图像的文件较大。
+编辑能力
+
+矢量图形：易于编辑，可以轻松修改形状、线条和颜色。
+光栅图形：编辑较困难，通常需要专业的图像处理软件，且可能降低图像质量。
+渲染速度
+
+矢量图形：在某些情况下，渲染复杂形状可能需要更多时间。
+光栅图形：由于已经预定义了每个像素的颜色和亮度，因此渲染速度较快。
+真实感
+
+矢量图形：通常用于创建简洁、清晰的图形，如标志、图标等。
+光栅图形：更适合表现复杂的自然场景、照片和逼真的视觉效果。
+
+矢量图格式包括:
+SVG (Scalable Vector Graphics)
+PDF (Portable Document Format)
+EPS (Encapsulated PostScript)
+AI (Adobe Illustrator)
+CDR (CorelDRAW)
+
+光栅格式包括: 
+PNG (Portable Network Graphics)
+JPEG (Joint Photographic Experts Group)
+GIF (Graphics Interchange Format)
+BMP (Bitmap)
+TIFF (Tagged Image File Format)
+EXR (OpenEXR)
+and on
+
 ## 文件格式
 纹理文件格式是指用于存储纹理数据的文件格式。这些格式定义了纹理数据的组织方式、压缩方式以及元数据等信息。常见的纹理文件格式包括：
 
 1. PNG (Portable Network Graphics)
 2. JPEG (Joint Photographic Experts Group)
 3. BMP (Bitmap)
-4. TIFF (Tagged Image File Format)
+4. TIFF (Tagged Image File Format) 类似DICOM格式,通过tag来描述数据，一个.tiff文件可以包含多个图像(subfile)
 5. GIF (Graphics Interchange Format)
 6. HDR (High Dynamic Range) ![alt text](HDRFileStructure.png) RGBE 是一种用于存储高动态范围(HDR)图像的格式，也称为 Radiance RGBE 格式
    数据结构:
@@ -730,4 +782,21 @@ Compress:Block Compression BC1/2/3/4/5/6/7
 -   **工作流集成**：考虑工具与你主要使用的3D软件（如Maya、3ds Max、Blender、Unity、Unreal Engine）的兼容性。例如，Substance工具与Unreal Engine和Unity的集成非常紧密。
 
 希望这份工具指南能帮助你找到最适合你项目的利器！如果你能分享一下你主要从事的领域（比如是游戏角色制作、场景环境艺术，还是产品可视化），或许我可以给出更具体的流程建议。
+
+
+# 纹理查看工具
+openexr
+openjph
+opencolorio
+openImageIO
+https://github.com/mmp/pbrt-v4.git
+
+ILM-OpenEXR 没有vs的preset https://github.com/AcademySoftwareFoundation/openexr
+tev 及其依赖的各种库 https://github.com/Tom94/tev 支持各种文件格式的纹理查看器
+openjpl
+
+NVIDIA Texture Tools https://developer.nvidia.com/textools
+UE4-DDS-Tools https://github.com/matyalatte/UE4-DDS-Tools 使用微软的DirectXTex库的Texconv工具
+https://developer.nvidia.com/legacy-texture-tools
+
 
