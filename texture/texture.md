@@ -713,21 +713,53 @@ ARM和AMD提出，Khronos维护，KHR_texture_compression_astc_hdr
 - bitrate灵活
 - 支持2D/3D纹理
 
-### 不同压缩格式的开源实现
+## 压缩算法开源实现
 不同的纹理压缩格式需要不同的硬件来支持，但也可以使用软件实现，以下是一些开源实现，可以用来预生成纹理压缩文件
 https://github.com/BinomialLLC/crunch 多种纹理压缩格式，包括pvrtc
 https://github.com/knarkowicz/GPURealTimeBC6H BC6H实现
 https://github.com/Ericsson/ETCPACK.git etc
 https://github.com/ARM-software/astc-encoder ASTC encoder
+https://code.google.com/archive/p/libsquish/
 
-Real-Time-Dxt-Compression.pdf里列出了很多实现某些压缩格式的参考文献
+### Open Source Encoders
+
+* I still maintain [A High Quality SIMD BC1 Encoder](https://github.com/castano/icbc).
+* [rgbcx](https://github.com/richgel999/bc7enc/blob/master/rgbcx.h) is another high-performance (but scalar) BC1-5 encoder.
+* [stb_dxt](https://github.com/nothings/stb/blob/master/stb_dxt.h) is a single header library that provides low quality, but fast BC1-5 encoders.
+* [Binomial](https://www.binomial.info/) is an image and texture compression company that develops [Basis a universal texture codec](https://github.com/BinomialLLC/basis_universal) and also has [other open source codecs](https://github.com/BinomialLLC).
+* [Intel ISPC Texture Compressor](https://github.com/GameTechDev/ISPCTextureCompressor) is a set of set of open source SIMD texture encoders that are very fast, but low quality.
+* [AMD Compressonator](https://gpuopen.com/compressonator/) offers various open source encoders that also run on the GPU.
+* [Betsy](https://github.com/darksylinc/betsy/) is a compressor for various GPU formats using compute shaders.
+* For ETC encoders see Google's [Etc2Comp](https://github.com/google/etc2comp), Bartosz Taudul's [etcpak](https://github.com/wolfpld/etcpak) and Rich Geldreich's [rg-etc1](https://github.com/richgel999/rg-etc1).
+* [ARM ASTC Encoder](https://github.com/ARM-software/astc-encoder) is an excellent ASTC encoder.
+* This is [a good overview of the state of texture encoders in 2020](https://aras-p.info/blog/2020/12/08/Texture-Compression-in-2020/).
+
+### Image Processing and IO
+
+* [stb_image_resize](https://github.com/nothings/stb/blob/master/stb_image_resize.h) provides polyphase image resize filters that are similar to what NVTT supports.
+* [Dario Manesku's cube map filtering tool](https://github.com/dariomanesku/cmft) seems like a good alternative for the cube map filtering functions in NVTT.
+* [CubeMapGen](https://gpuopen.com/archived/cubemapgen/) is another source of information for cubemap filtering algorithms, but is now unsupported as well.
+* Deano Calver supports [three tiny libraries](https://deanoc.com/2019/09/tiny) that provide support for DDS and KTX file formats, and pixel format conversion.
+* [stb_image](https://github.com/nothings/stb/blob/master/stb_image.h) and [stb_image_write](https://github.com/nothings/stb/blob/master/stb_image_write.h) are two handy single header libraries to read and write images in various formats.
+* https://github.com/syoyo/tinyexr
+* https://lodev.org/lodepng/
+* [texturec](https://bkaradzic.github.io/bgfx/tools.html#texture-compiler-texturec) is a handy command line tool similar to `nvcompress`, built on top of [bimg](https://github.com/bkaradzic/bimg).
+* The venerable [ImageMagick](https://imagemagick.org/) still provides many valuable tools and utilities.
+
+### Commercial Libraries
+
+* [Oodle Texture](http://www.radgametools.com/oodletexture.htm) is a suite of commercial RDO texture codecs.
+* [NVIDIA Texture Tools exporter](https://developer.nvidia.com/nvidia-texture-tools-exporter) is based on a private fork of this project and offers additional GPU accelerated codecs, but it's not open source.
+
+
+[Real-Time-Dxt-Compression](./Real-Time-Dxt-Compression.pdf)里列出了很多实现某些压缩格式的参考文献
 
 各大硬件厂商nvidia arm amd 高通等都有自己的技术blog讲实现
 Microsoft也有很多开发资料
 mesa也有实现
 
 
-## DirectXTex 纹理处理库
+### DirectXTex 纹理处理库
 DirectXTex 是微软开发的一套用于处理纹理的库，它提供了丰富的功能来加载、处理和保存纹理。DirectXTex 可以与 DirectX 11 和 DirectX 12 一起使用，并且支持多种纹理格式。
 
 Windows Image Components (WIC) 是一个用于处理图像的 Windows API，它提供了一种统一的接口来加载、处理和保存各种图像格式。WIC 支持的图像格式包括 BMP、JPEG、PNG、GIF、TIFF 等。
