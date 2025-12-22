@@ -37,6 +37,7 @@ mtl不知道干啥
 ### mesh
 ### osm
 ### prefab
+引擎预先定义的预制体,主要包含*.prefab及对应的材质和纹理
 ### shaders
 引擎使用的shader 包含.h 和.c
 ### textures
@@ -977,74 +978,80 @@ TerrainNode
 5. .mtl 跟.mat啥区别? .mtl是材质与shader的关联?
 6. .mat材质文件是材质文件,有两种一种是模板(父材质) 一种是实例(实例在编辑器里的图标加了锁链,意思是锁定无法修改了,标题栏也会显示INTANCE) .world文件中会在surface里指定对应的.mat文件
    1. 实例材质的.mat文件主要包含父材质的目录及其他属性
-   ```c++
-	materials//一个.mat文件应该可以有多个material
-	{
-		material//指定的各种属性会在材质编辑器的左侧属性列表中显示,应该没有全部显示,只显示了一部分
+		```c++
+		materials//一个.mat文件应该可以有多个material
 		{
-			parent = "data/core/materials/default/DefaultGrass.mat";//指定父材质
-			parent_path = "data/core/materials/default/DefaultGrass.mat";
-			parameter//可以指定多个parameter
+			material//指定的各种属性会在材质编辑器的左侧属性列表中显示,应该没有全部显示,只显示了一部分
 			{
-				text = 0.1;
-				name = "const_value2119873691";
-				type = "slider";
-			}
-			
-			texture//可以指定多个texture
-			{
-				text = "data/core/textures/grass/impostor.png";
-				name = "texture1630948199";
-				tag = "albedo";
-			}
+				parent = "data/core/materials/default/DefaultGrass.mat";//指定父材质
+				parent_path = "data/core/materials/default/DefaultGrass.mat";
+				parameter//可以指定多个parameter
+				{
+					text = 0.1;
+					name = "const_value2119873691";
+					type = "slider";
+				}
+				
+				texture//可以指定多个texture
+				{
+					text = "data/core/textures/grass/impostor.png";
+					name = "texture1630948199";
+					tag = "albedo";
+				}
 
-			state//可以指定多个state
-			{
-				name = "Impostor";
-				text = 1;
-			}
-			
-			options//可以指定多个options
-			{
-				render_order = 1;
+				state//可以指定多个state
+				{
+					name = "Impostor";
+					text = 1;
+				}
+				
+				options//可以指定多个options
+				{
+					render_order = 1;
+				}
 			}
 		}
-	}
-   ``` 
-   ![alt text](实例材质的属性.png)
+		``` 
+	![alt text](实例材质的属性.png)
 
    2. 模板材质的.mat文件除了包含与实例材质相同的materials字段外,最重要的是还包含blueprint字段,指定了材质蓝图节点结构
-   ```c++
-	blueprint//整个蓝图的节点结构
-	{
-		version = 1;
-		node//蓝图中的节点,包含id type name pos_x pos_y等属性
+		```c++
+		blueprint//整个蓝图的节点结构
 		{
-			id = 28;
-			type = "PS.Output.Grass";//材质蓝图节点的类型,由block.cfg文件定义
-			name = "PS.Output.Grass";
-			pos_x = 60665;//在材质编辑器平面上的xy坐标
-			pos_y = 60326;
-		}
-		node
-		{
-			id = 1918194810;
-			type = "PS.Input.Grass";
-			name = "PS.Input.Grass";
-			pos_x = 57423;
-			pos_y = 60421;
-		}
+			version = 1;
+			node//蓝图中的节点,包含id type name pos_x pos_y等属性
+			{
+				id = 28;
+				type = "PS.Output.Grass";//材质蓝图节点的类型,由block.cfg文件定义
+				name = "PS.Output.Grass";
+				pos_x = 60665;//在材质编辑器平面上的xy坐标
+				pos_y = 60326;
+			}
+			node
+			{
+				id = 1918194810;
+				type = "PS.Input.Grass";
+				name = "PS.Input.Grass";
+				pos_x = 57423;
+				pos_y = 60421;
+			}
 
-		joint//节点之间的连线
-		{
-			node_0 = 1918194810;//起始节点id
-			node_1 = 1199575332;//终止节点id
-			anchor_0 = "xyz";//起始节点连接点名称
-			anchor_1 = "value";//终止节点连接点名称
+			joint//节点之间的连线
+			{
+				node_0 = 1918194810;//起始节点id
+				node_1 = 1199575332;//终止节点id
+				anchor_0 = "xyz";//起始节点连接点名称
+				anchor_1 = "value";//终止节点连接点名称
+			}
 		}
-	}
-   ```
-7. block.cfg中定义了blocks,block定义了.mat材质文件中blueprint下的node代表的shader的数据结构，
+		```
+   3. 材质跟材质实例的关系，
+		逻辑关系上，类似类和对象实例的关系，材质是个模板，实例是根据这个模板生成的对象(可以修改材质中的参数)  
+		实现关系上，代码实现上应该是一个派生关系  
+		物理存储引擎具体文件上，都是.mat文件，材质文件包含editor、blueprint(里面含有node(节点id name type 位置)，joint(起始节点 指向节点 起始节点引脚 指向节点引脚))、materials(包含state(应该部分显示在了UI上的状态)、shader)，材质实例文件包含materials指向材质文件<br/>
+		.mat文件里材质的参数与UI界面上参数对应，但是名称不一样了
+
+7. block.cfg中定义了blocks,block定义了.mat材质文件中blueprint下的node代表的shader的数据结构，data\core\materials\generate\block.cfg
    本质应该就是定义了一段shader代码,形式上是通过定义一种数据结构,这种数据结构包含input_path output_path定义输入输出参数及执行的function
 	```c++
 	block
@@ -1095,6 +1102,25 @@ TerrainNode
 9.  .prefab预制体配置文件可以看做是一个小的.world文件，里面包含多个节点，可以嵌套，可以包含多个surface，可以包含多个node
 
 
+# IR.h扩展 
+data\core\shaders\common\ir.h
+data\core\shaders下可以修改shader代码
+修改block后，可以在材质蓝图里添加这段代码 从而修改材质
+支持2d 3d cube 2darray纹理,1d认为是w*1的2d纹理
+TEXTURE返回的值是float4
+
+材质里纹理使用名称索引，shader里使用id，id咋设置?
+
+# 使用
+添加地球节点时，必须有earth文件夹及下面的文件
+
+可以新建世界，然后添加地球节点
+
+可以建一个dummy节点，指定经纬度，这样可以快速回到特定位置
+
+鼠标加键盘进行导航，比单独鼠标要靠谱
+
+地球无法直接绑定mesh的材质
 
 # TODO
 1. ~~node world等场景组织 然后是场景数据~~
