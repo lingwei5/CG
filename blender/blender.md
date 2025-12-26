@@ -1,6 +1,9 @@
 整个文档都应该看看，只不过重点是uv 渲染 材质 光照 动画以及基础的文件系统
 blender manual: https://docs.blender.org/manual/en/latest/index.html 学习
 
+4.0开始rendering有重大更新 新的Principled BSDF shader with coat and sheen layers  
+
+
 图标是个比较好的提示
 
 Photorealistic Materials and Textures in Blender Cycles - Fourth Edition
@@ -10,37 +13,107 @@ Blender script with python
 dream-textures是stable diffusion的blender插件https://github.com/carson-katri/dream-textures
 
 # User Interface
-window系统
-## Top Bar
-## Status Bar
-## workspace
-Workspaces are essentially predefined window layouts. Each Workspace consists of a set of Areas containing Editors, and is geared towards a specific task such as modeling, animating, or scripting. 
-## Areas
-The Blender window is divided into a number of rectangles called Areas. Areas reserve screen space for Editors, such as the 3D Viewport or the Outliner. Each editor offers a specific piece of functionality.
-## Regions
+## window系统
+![蓝色的TopBar 绿色的workspace 红色的Status Bar](<blender UI 3大部分.png>)  
+
+![TopBar](TopBar.png)  
+
+![workspace](workspace.png)  
+
+![status](status.png) 有一些资源 log 鼠标 键盘状态等的信息
+
+### workspace
+1. window系统中最主要的部分就是workspace部分:  
+   Workspaces are essentially predefined window layouts. Each Workspace consists of a set of Areas containing Editors, and is geared towards a specific task such as modeling, animating, or scripting.  
+
+
+2. ![Areas](window中不同的Areas.png)可以认为是editor在窗口的占位符或容器  
+   The Blender window is divided into a number of rectangles called Areas. Areas reserve screen space for Editors, such as the 3D Viewport or the Outliner. Each editor offers a specific piece of functionality.
+
+3. ![Regions](editor下的不同Regions.png)
+
+workspace下有多个areas，每个area下有多个editor可切换，每个editor下有多个region，每个region可以有tab/panel等完成特定功能    
+每个editor的region主要包括:  
+Toolbar Sidebar Headerbar 及 中央的main region
+
+## keymap
+
+## UI Elements
+button widget menus input-field
+
+## Tools & Operators
+undo redo
+
+## Nodes
+blender有很多基于node的编辑器  
+包括geometry nodes, shader nodes, texture nodes, composite nodes等
 
 # Editors
 ![alt text](各种editors.png)
-支持整个 3D 创作流程：建模、雕刻、骨骼装配、动画、模拟、实时渲染、合成和运动跟踪，甚至可用作视频编辑及游戏创建 
+支持整个 3D 创作流程：建模、雕刻、骨骼装配、动画、模拟、实时渲染、合成和运动跟踪，甚至可用作视频编辑及游戏创建, 包括property editor   
 
 每种editor都是针对特定资源的编辑器
 workspace是针对某种工作流组合多种编辑器的预定义布局
 
-Toolbar 
-sidebar
-headerbar
+每个editor的介绍至少都包括:  
+1. Toolbar 
+2. sidebar
+3. headerbar
+4. overlay
+5. navigation
 
-每个editor下有多种mode，如3d view的select edit等mode
+每个editor下有多种mode，如3d view的select edit等mode, tab可以切换前两种mode ctrl+tab弹出mode选择窗口
 
 overlay:
 	模型下的overlay有文字 注解 grid 骨骼 动画等等
 	不同的editor有不同的overlay
 
-## 3D View
-导航有很多模式
-1. 鼠标中键进行shift平移 按住旋转 滚轮缩放
-2. 还有walk mode，fly mode，是第一人称视角，这些模式是暂时的，确认后会退出，可以使用键盘操作
+**Gizmo**:  
+Gizmos are graphical representations of tools that allow you to manipulate objects, lights, cameras, and other elements in the 3D Viewport. They are interactive and provide a visual representation of the tool's current state and allow you to manipulate it using the mouse or keyboard.  
+嵌入3d场景中的可视化交互工具,主要功能包括变换(旋转 缩放 平移)、调试辅助(显示碰撞体、光源位置、相机位置、视景体等)  
 
+在场景视图（Scene View）中显示为临时的、非游戏运行时的图形，帮助开发者在设计和调试阶段更好地理解对象的位置、方向和交互。这些Gizmos可以是线、点、框、球或其他几何形状，用于表示各种功能，如变换轴、碰撞体、关节、导航网格等。  
+
+the Pivot Point determines the location of the Object Gizmo.
+
+pivot types:
+![alt text](<pivot types.png>)
+
+snapping target
+
+## 3D Viewport
+
+### navigation
+导航有很多模式
+1. 标准模式
+2. 还有walk/fly navigation，是第一人称视角，这些模式是暂时的，点击鼠标确认后会退出选中的模式，可以使用键盘操作
+
+小键盘快捷键:
+- 2 4 6 8 旋转, ctrl+2 4 6 8平移
+- 5切换投影方式
+- 0切换相机/上帝视角
+- 1 3 5 7切换三视图方向
+
+**标准模式下有很多交互样式**:  
+1. orbit:MMB,小键盘2468旋转预定角度
+   alt键在orbit下
+   - alt键+MMB点击一个点,此点成为pivot点，旋转时围绕此点旋转
+   - 按住alt键,拖动MMB，画一条线，旋转时围绕此轴旋转
+   - 先拖动MMB，再按住alt键，旋转时围绕此轴旋转并吸附到世界轴
+2. pan:shift+MMB拖动，平移
+3. zoom:滚轮缩放
+4. dolly:shift+ctrl+MMB
+5. 句点.:跳到选中物体的视角
+
+### walk/fly navigation
+view->navigation->walk/fly navigation:
+移动鼠标，或者qwer等键盘移动视角,左键点击确认视角，右键/esc取消视角
+
+
+### 3d cursor
+是空间中一个点,具有位置和旋转,可以用来指定新添加的物体的位置或者手动指定gizmo的位置
+
+shift+RMB点击3d cursor,可以设置3d cursor的位置,或者选中toolbar下的cursor，然后左键
 
 ## image editor
 
@@ -48,13 +121,20 @@ overlay:
 ## UV editor
 UV Editing比layout下的editor功能更丰富
 
+navigation:  
+Sync Selection:同步uv和3d view的选中状态  
+vertex  
+edge  
+face  
+uv island selection
 
+与object有类似的selection功能
 
 # Scenes & Objects
-选中对象(橙色) 激活对象(最近一次选中的对象，黄色) ![alt text](Active&SelectedObject.png)
+
 ## Scenes
 ## Objects
-一个或多个Object构成一个Scene，
+一个或多个Object构成一个Scene，  
 object type包括mesh, light, curve, camera, etc，由两部分组成
 1. object:Holds information about the position, rotation and size of a particular element
 2. objectData
@@ -69,8 +149,28 @@ object type包括mesh, light, curve, camera, etc，由两部分组成
 
 object type包括mesh curve surface text volume armature camera lamp speaker
 
+object的origin在平移旋转中很重要 选中物体时会显示原点 
+
+选中对象(橙色) 激活对象(最近一次选中的对象，黄色) ![alt text](Active&SelectedObject.png)  
+Object的selection state包括:
+1. active
+2. selected but not active
+3. not linked and not selected
+4. linked
+5. selected,linked, but not active
+
+a:全选所有object  
+alt-a:全不选  
+ctrl-i:反选  
+b:box selection  
+还有从菜单栏打开的选择菜单功能  
+
+### Editing
+这是物体编辑的重点内容https://docs.blender.org/manual/en/latest/scene_layout/object/editing/index.html
+
 ## Collections
 把objects组织起来，方便管理
+
 ## View Layers
 方便渲染，可以设置哪些object被渲染，哪些被忽略
 
@@ -132,6 +232,18 @@ image editor有view paint mask等mode
 油画笔
 
 # Animation & Rigging
+动画是使物体随着时间移动或者改变形状
+动画有多种形式
+1. 物体作为一个整体进行移动(改变位置，旋转，缩放等)
+2. 变形:顶点或控制点动画
+3. 继承动画
+
+骨骼编辑模式 E键进入骨骼挤出模式 移动鼠标后点击退出挤出模式
+1. 创建骨架 armature,可以修改骨架的属性 形状 父子关系 挤出方向
+2. 多个骨架可以连接起来
+
+
+rigging插件有预设骨架 humuan basic animal
 
 # Physics
 
@@ -224,6 +336,7 @@ OpenColorIO用于管理颜色，包括颜色空间转换，颜色校正等
 
 
 ~~# Compositing~~
+
 # Motion Tracking & Masking
 ~~# Video Editing~~
 # Assets, Filse & Data System
@@ -270,7 +383,7 @@ blender 3渲2 用3d模型渲染2d手绘般的效果 npr非真实感渲染的一�
    6. + - 缩放微调
 
 3. 物体控制
-先选中物体,
+先选中物体,小键盘的.切换物体
 	G:按住G，移动物体，GXYZ分别代表x,y,z轴移动，G+中键坐标轴平移
 	R:代表旋转，
 	S:代表缩放 
@@ -281,8 +394,45 @@ blender 3渲2 用3d模型渲染2d手绘般的效果 npr非真实感渲染的一�
 
 H:隐藏 alt+H shift+H
 
+n:切换侧边栏显示
+
+tab:切换模式 在最前面的两种模式间切换 编辑模式，物体模式，编辑模式，雕刻模式，顶点模式，权重模式，粒子模式，曲线模式，曲面模式，metaball模式，文本模式，点云模式，体积模式，空物体模式，修改器模式，几何节点模式
+
+ctrl+tab:切换模式 调出模式列表进行选中切换
+
 alt+某快捷键，撤销某种
 
 select选择工具:框选 套索 a全选 c刷选，shift加选或减选
 
-first princple
+模型编辑模式下，可以添加法线显示的overlay
+
+
+# blender的插件
+各个小版本之间的插件安装方式都不一样  
+4.5.3主要的安装方式有:  
+1. edit->preferences->addons,可以选择内置插件,勾选激活
+2. edit->preferences->addons->install from file,从硬盘选择插件安装,插件主要是压缩包或.py文件
+3. 拖拽压缩包安装
+
+安装失败的原因:  
+1. 当您打算下载它时，插件 .py 文件会在浏览器中显示为代码。
+2. 插件以 .zip 文件形式下载，但本应以 .py 文件形式安装
+3. 一个压缩得很深的插件 .zip。
+4. 一个压缩在 .zip 内的插件。
+
+插件安装的位置:
+第三方插件，打开插件能看见文件位置 内置的没有提示应该是在blender安装目录下4.5\scripts\addons_core
+https://github.com/matyalatte/Blender-DDS-Addon
+
+# uv展开
+https://www.bilibili.com/video/BV114hgzYETE?vd_source=ffd47f490f976be9dd70c839d34b8fdc&spm_id_from=333.788.videopod.sections
+
+
+# TODO
+- [x] 导航时鼠标操作及小键盘快捷键
+- [x] 3d视图快捷键
+- [x] . gizmo center, pivot, origin, active object, select object
+- [] asset datablock
+- [] uv editor
+- [] texture node
+- [] shader node
