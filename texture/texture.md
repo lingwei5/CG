@@ -237,6 +237,10 @@ UV展开是将3D模型表面的顶点映射到2D纹理空间的过程。这个�
 •   UV岛： 在UV布局中，一个连续的、展开的网格片段称为一个“UV岛”。
 
 •   接缝： 为了将封闭的3D模型摊平，必须在模型上“切割”出接缝。接缝在UV布局中表现为UV岛的边界。
+  
+  - uv packing: 将多个uv岛打包到一个纹理贴图中,以最大化纹理空间最小化空白区域
+  - texel density: 纹理贴图上的像素密度,通常用每单位面积上的像素数量来衡量
+  - overlapping uvs: 在uv展开中,如果两个uv岛在纹理贴图上有重叠或者一个岛的不同部分有重叠,则称为重叠uv
 
 2. 为什么需要？
 3D模型本身没有“表面图像”的概念。为了给模型赋予丰富的颜色、细节和材质信息（这些信息存储在2D纹理图中），就必须建立一个从3D到2D的桥梁。UV坐标就是这个桥梁。
@@ -447,7 +451,31 @@ Baking tools support multiple map types. High-resolution normals go into a Norma
 
 低模紧密包裹高模，从低模向内部的高模投射光线，光线打到高模时记录表面细节，保存到纹理贴图中，使用低模的纹理坐标。实现的技术应该就是Render To Texture
 
-# UVAtlas 
+
+## TEXTURE Atlas
+纹理图集（Texture Atlas）是一种将多个小纹理合并成一个大纹理的技术，以减少纹理切换的开销。在游戏开发中，使用纹理图集可以显著提高渲染性能，因为减少了GPU在渲染过程中切换纹理的次数。
+
+### 优点
+
+1. 减少纹理切换：通过将多个小纹理合并成一个纹理图集，可以减少GPU在渲染过程中切换纹理的次数，从而提高渲染性能。
+2. 减少内存占用：将多个小纹理合并成一个纹理图集可以减少内存占用，因为GPU只需要加载一个大纹理，而不是多个小纹理。
+
+nvidia的 AtlasCreationTool、AtalsComparasionViewer是制作纹理图集的工具
+
+制作纹理图集的步骤:
+1. 收集所有需要合并的纹理,这些纹理打断了流水线切换了状态,降低了batch size
+2. 把这些纹理放入一个大的纹理中,并记录每个纹理的位置和大小
+3. 更新所有用到这些纹理的模型的UV坐标,使其指向新的纹理图集的sub-rectangle
+4. 一次drawcall渲染整个图集
+
+### 纹理图集的mipmap
+
+实际上,纹理图集的mipmap是每个纹理的mipmap copy到纹理图集的对应level上,而不是直接对atlas进行mipmap  
+图集中尺寸最大的纹理决定了图集的mipmap level, 小尺寸的纹理比如有冗余的mipmap level,   
+也可以由最小尺寸的纹理决定图集的mipmap level, 但是效果不好  
+也可以只选择尺寸一样的纹理放到一个atlas里
+
+# UVAtlas 库
 是对uv展开中的基于信号处理的自动化展开算法的一个经典实现
 open3d 也有一个实现compute_uvatlas
 https://learn.microsoft.com/pl-pl/windows/win32/direct3d9/using-uvatlas
