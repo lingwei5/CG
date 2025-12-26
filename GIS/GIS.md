@@ -176,6 +176,7 @@ geodisc测地距离
 
 ## GIS数据获取途径
 搜 地理信息数据云
+gisdata123 mlwzsy@126.com
 1. 地图服务
    1. google地图
    2. bing地图
@@ -193,7 +194,8 @@ geodisc测地距离
       5. Planet
       6. DigitalGlobe
 3. 国内
-   1. 地理空间数据云http://www.gscloud.cn
+   1. 地理空间数据云http://www.gscloud.cn ![alt text](gscloud数据浏览.png) 
+      - 数据命名规则:数据来源_行号_条带号, 行号按照纬度划分 条带号按照经度划分，如 ASTGTM_N09E001 表示北纬9度，东经1度的区域；srtm_25_02表示西经57.5 北纬52.5
    2. 天地图http://www.tianditu.gov.cn
    3. 国家卫星气象中心 http://www.nsmc.org.cn
    4. 中国科学院数据云 www.csdb.cn
@@ -209,6 +211,22 @@ geodisc测地距离
    5. FAO GeoNetwork https://foo.org
 
 ## 坐标系
+
+一般东经 北纬作为正数
+
+极半径 6356752 米  
+平均半径 6371008 米  
+赤道半径6378137 米  
+
+```c++
+dvec3 world_ori_in_wgs =	e->toWGS(dvec3(0,0,0));//世界坐标系原点(地心)的经纬高(0,90,-6356752)应该等价于(0,0.-6378137)
+dvec3 wgsv_xaxis_in_world =	e->toWorld(dvec3(0,0,0));//东经0°北纬0°的地球表面点(wgs坐标系的x轴,赤道平面上一点)的世界坐标系(6378137.0000000000,0,0)
+dvec3 wgsv_yaxis_in_world =	e->toWorld(dvec3(90,0,0));//东经90°北纬0°的地球表面点(wgs坐标系的y轴,赤道平面上一点)的世界坐标系(0,6378137,0)
+dvec3 wgsv_zaxis_in_world =	e->toWorld(dvec3(0,90,0));//东经0°北纬90°的地球北极点(wgs坐标系的z轴,北极点)的世界坐标系(0,0,6356752.3142451795)
+dvec3 wgsv_south_pole_in_world = e->toWorld(dvec3(0,-90,0));//东经0°南纬90°的南极点(wgs坐标系的-z轴,南极点)的世界坐标系(0,0,-6356752.3142451795)
+```
+
+![alt text](地球.png)
 
 ![alt text](真实世界的一点到屏幕上像素的坐标变换.png)
 
