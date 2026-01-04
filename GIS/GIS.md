@@ -254,23 +254,35 @@ dvec3 wgsv_south_pole_in_world = e->toWorld(dvec3(0,-90,0));//东经0°南纬90�
 
 1. 常见坐标系
    1. 大地坐标系:定位地球上的点 用经度 纬度 高程表示 lambda phi h
-	是最基础、最常用的坐标系 大地测量坐标系用来测量测绘的
-    由于地球不是完美的椭球体 需要定义一个基准椭球体来表示地球
-	事实上的标准是WGS84 World Geodetic System 1984,
-		本初子午线(英国格林尼治天文台)以东或以西
-		赤道(非洲赤道)以北或以南
-		高程相对于 ​​WGS 84 椭球面​​的高度（单位：米）。请注意，这不同于我们常说的“海拔高”（相对于大地水准面）
-   2. 地心地固直角坐标系:计算机内部计算 ECEF
-		原点在地球质心
-		z轴指向北极
-		x轴指向本初子午线与赤道的交点,即经度0 纬度0的点
-		y轴指向东经90度 大概是印度洋位置
-		xyz轴构成右手系
-		xyz轴的单位是米
+   A geodetic system uses the coordinates (lat,lon,h) to represent position relative to a reference ellipsoid.大地坐标系使用经纬高来表示相对于参考椭球面的位置  
+	是最基础、最常用的坐标系 大地测量坐标系用来测量测绘的  
+    由于地球不是完美的椭球体 需要定义一个基准椭球体来表示地球  
+    根据参考椭球的不同，有很多种坐标系，比如 CGCS2000、Beijing 1954 等
+	事实上的标准是WGS84 World Geodetic System 1984:  
+    - 本初子午线(英国格林尼治天文台)以东或以西
+    - 赤道(非洲 亚洲 南美洲)以北或以南
+    - 高程相对于 ​​WGS 84 椭球面​​的高度（单位：米）。请注意，这不同于我们常说的“海拔高”（相对于大地水准面）
+    
+   2. 地心地固直角坐标系:计算机内部计算使用 ECEF
+        原点在地球质心
+        z轴指向北极点
+        x轴指向本初子午线与赤道的交点,即经度0 纬度0的点
+        y轴指向东经90度 北纬0° 大概是印度洋 新疆西藏云南南部位置
+        xyz轴构成右手系
+        xyz轴的单位是米  
+        ![alt text](ECEF.png)
+        又叫geocentric corrdinate system 地心直角坐标系，地球坐标系
+        术语 geocentric​ 更侧重于描述坐标系的几何属性，即原点位于地心。而 ECEF​ 这个名称则进一步强调了该坐标系的物理特性——它不仅原点在地心，而且还与地球固联，并随着地球一起旋转。正因为地球的自转，ECEF 是一个非惯性参考系
+        通过cartesian坐标(x,y,z)表示相对于地心的位置，而地心与参考椭球球心的距离取决于采用的reference ellipsoid.  
+        An Earth-centered Earth-fixed (ECEF) system uses the Cartesian coordinates (X,Y,Z) to represent position relative to the center of the reference ellipsoid. The distance between the center of the ellipsoid and the center of the Earth depends on the reference ellipsoid. 因此可以转换到大地坐标系
    3. 投影坐标系:在平面上展开地球
       1. Mercator投影:google地图 bing地图 OpenStreetMap等web地图服务底层都是墨卡托投影 保持形状不变，等角投影, 但面积变形严重
       2. UTM投影:美国通用，将地球划分为60个区域，每个区域投影到平面，区域内的坐标是UTM坐标，区域外的坐标是经纬度坐标
-      3. 
+      3. 信息
+   4. 站心坐标系/局部坐标系  基于大地坐标系下某一点的坐标系
+      1. East-North-Up Coordinates enu ![alt text](enu坐标系.png)
+      2. North-East-Down Coordinates ned ![alt text](ned坐标系.png)
+      3. Azimuth-Elevation-Range Coordinates aer ![alt text](aer坐标系.png)
 
 ### 第一部分：GIS中常见的坐标系
 
@@ -456,9 +468,9 @@ AFSIM:美国空军研发
 VR-Forces：沉浸式训练先锋
 EADSIM：防空反导专业平台
 
-Open Source GeoSpatial Foundation
-gdal:支持很多种数据及格式的读写，可以看看doc GDALGeoTransform GDALDataset
-proj
-grass
+Open Source GeoSpatial Foundation:旗下有很多开源库  
+gdal:Geospatial data abstraction library,支持很多种数据及格式的读写，可以看看doc GDALGeoTransform GDALDataset  
+proj:a generic coordinate transformation software that transforms geospatial coordinates from one coordinate reference system (CRS) to another  
+grass:Geographic resource analysis support system  
 osgeo
 
