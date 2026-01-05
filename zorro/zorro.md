@@ -188,7 +188,7 @@ class IApp
 }
 ```
 ```c++
-class GameSystem
+class GameSystem //游戏系统的运行流程
 {
 public:
 	/**
@@ -230,7 +230,7 @@ public:
 ```
 
 ```c++
-class GameWorld
+class GameWorld//游戏中世界的运行流程
 {
 	//引擎运行流程相关api
 }
@@ -286,6 +286,101 @@ LightProj
 LightOmni:泛光等，约等于点光源，但是支持阴影
 
 ### material
+
+### math
+- Geometry.h 几何相关 正交基 三角形(area normal plane) 点与三角形/多边形的位置关系、距离，碰撞检测 earclipping
+- jMath.h 
+  - jMath:经纬度 wgs cgcs2000 初等函数(三角函数 log pow sqrt)
+	```c++
+	static dvec3 lonLatAltToMercator(dvec3 lonLatAlt);
+	//墨卡托转经纬度,单位°
+	static dvec3 mercatorToLonLatAlt(dvec3 xyz);
+	//日角（单位"度"）
+	//GMT为格林威治时间，北京为GMT=8.0，传入的时间要与GMT匹配
+	static double sunAngle(int year, int month, int day, int hour, int minute, int second, double GMT = 8.0);
+	/*
+	输入参数：
+	Longitude - 经度（单位"度"）
+	Latitude  - 纬度（单位"度"）
+	Year      - 年
+	Month     - 月
+	Day       - 日
+	Hour      - 时
+	Minute    - 分
+	Second    - 秒
+	输出参数：
+	x   - 太阳高度角   （单位"度"）
+	y	- 太阳方位角   （单位"度"）
+	太阳高度角是指太阳光的入射方向和地平面之间的夹角
+	太阳方位角是指太阳光线在地平面上的投影与当地经线的夹角
+	GMT为格林威治时间，北京为GMT=8.0，传入的时间要与GMT匹配
+	*/
+	static dvec2 sunPositionNR(double Longitude, double Latitude, int year, int month, int day, int hour, int minute, int second, double GMT = 8.0);
+	//月球位置计算:黄经,黄纬，距离（单位"度",米）
+	static dvec3 moonPosition(int year, int month, int day, int hour, int minute, int second);
+	static double normalizeAngle(double v);
+	```
+  - EllipsoidModel:椭球模型，
+	```c++
+	enum WGS_MODE
+	{
+		WGS_MODE_NONE = -1,
+		WGS_MODE_84 = 0,
+		WGS_MODE_CGCS2000,
+		WGS_MODE_MOON,
+		WGS_MODE_MAX
+	};
+	class EllipsoidModel
+	{
+		//扁率F=(A-B)/A
+		//偏心率平方EE = 2 * F - F * F
+		//偏心率E = sqrt(EE) = C/A
+		double a;			//长半轴
+		double b;			//短半轴
+		double c;			//快速计算因子
+		double e;			//偏心率
+		double ee;			//e^2
+		double inv_a;		//1/wgs_a 
+		double inv_b;		//1/wgs_b
+		double aa;			//a*a
+		double bb;			//b*b
+		double cc;			//c*c
+		double one_minus_ee;//1-ee
+		double aa_div_c;	//aa/c
+		double bb_div_cc;	//bb/cc
+		double dash;		//(wgs_aa - wgs_bb) / (wgs_b)
+		double eea;			//wgs_ee*wgs_a
+		dvec3 wgs;
+		dvec3 inv_wgs;
+		//姿态计算当星球位置不在原点时有意义，比如计算月亮上的某点位置
+		bool is_transform_valid;
+		dmat4 transform;		//椭球姿态
+		dmat4 inv_transform;	//椭球姿态的逆变换
+		//
+		void setMode(WGS_MODE m);
+		void setTransform(const dmat4& mat);
+		//如果use_transform为false，则按照椭球坐标系位于0点计算，否则按照椭球真实位置计算
+		dvec3 toWorld(const dvec3& lon_lat_alt, bool use_transform = true)const;
+		dvec3 toWorld(double lon, double lat, double alt, bool use_transform = true)const;
+		dvec3 toWGS(const dvec3& xyz, bool use_transform = true)const;
+		dvec3 getWGSNormal(double lon, double lat, dvec3* ret_pos = 0, bool use_transform = true)const;
+		void getWGSTransform(const dvec3& xyz, dmat4& ret, bool use_transform = true)const;
+		dmat4 getWGSTransform(const dvec3& xyz, bool use_transform = true)const;
+		void getWGSTransform(double lon, double lat, const dvec3& pos, dmat4& ret, bool use_transform = true) const;
+	}
+	
+	```
+	根据椭球的数学模型以及输入的椭球坐标(经纬高)就可以计算得到物体的世界坐标  
+	世界坐标系的origin在wgs坐标系下的(0,90,-6356752):地心,z轴指向北极,xy平面为赤道平面,高度是相对于椭球面的高度所以地心是负的极半径，这个世界坐标系应该就是地心地固直角坐标系
+	可以在编辑器里测出世界坐标系的朝向:xyz与椭球面坐标系重合，z轴指向北极，xy平面为赤道平面  
+	```c++
+		dvec3 world_ori_in_wgs =	e->toWGS(dvec3(0,0,0));//世界坐标系原点(地心)的经纬高(0,90,-6356752)应该等价于(0,0.-6378137)
+		dvec3 wgsv_xaxis_in_world =	e->toWorld(dvec3(0,0,0));//东经0°北纬0°的地球表面点(wgs坐标系的x轴,赤道平面上一点)的世界坐标系(6378137.0000000000,0,0)
+		dvec3 wgsv_yaxis_in_world =	e->toWorld(dvec3(90,0,0));//东经90°北纬0°的地球表面点(wgs坐标系的y轴,赤道平面上一点)的世界坐标系(0,6378137,0)
+		dvec3 wgsv_zaxis_in_world =	e->toWorld(dvec3(0,90,0));//东经0°北纬90°的地球北极点(wgs坐标系的z轴,北极点)的世界坐标系(0,0,6356752.3142451795)
+		dvec3 wgsv_south_pole_in_world = e->toWorld(dvec3(0,-90,0));//东经0°南纬90°的南极点(wgs坐标系的-z轴,南极点)的世界坐标系(0,0,-6356752.3142451795)
+	```
+- SimdLib.h 可能是封装的开源的SimdLib https://ermig1979.github.io/Simd/
 
 ### mesh
 
@@ -363,82 +458,228 @@ BodyRigid
 
 
 ### render
-渲染的接口
-```c++
-//派生类有D3D11Viewport，GLViewport, 是图形api上下文的抽象 HDC HGLRC
-class RHIViewport
-{
-	IApp* m_widget;//哪个窗口创建的上下文
-public:
-	virtual void begin() = 0;
-	virtual void end() = 0;
-	virtual void beginPass(bool bind_pass = true) = 0;
-	virtual void endPass() = 0;
-	virtual void present() = 0;
-	virtual void release() = 0;
-public:
-	virtual void resize(int w, int h) = 0;
-	virtual void fullscreen(bool v = true) = 0;
-}
-```
+1. RHIViewport 渲染的接口
+	```c++
+	//派生类有D3D11Viewport，GLViewport, 是图形api上下文的抽象 HDC HGLRC
+	class RHIViewport
+	{
+		IApp* m_widget;//哪个窗口创建的上下文
+	public:
+		virtual void begin() = 0;
+		virtual void end() = 0;
+		virtual void beginPass(bool bind_pass = true) = 0;
+		virtual void endPass() = 0;
+		virtual void present() = 0;
+		virtual void release() = 0;
+	public:
+		virtual void resize(int w, int h) = 0;
+		virtual void fullscreen(bool v = true) = 0;
+	}
+	```
+
+2. RenderManager
+	```c++
+	//各种渲染资源的创建
+	class RenderManager
+	{
+		virtual RHIViewport* createViewport(IApp* wnd, const char* file, int line, const char* func) const;
+		Render *createRender(const char* file, int line, const char* func) const;
+		Shader *createShader(const char* file, int line, const char* func) const;
+		RenderTarget* createRenderTarget(int w, int h, int flags, const char* file, int line, const char* func) const;
+		Sampler* createSampler(int flags, int unit, const char* file, int line, const char* func) const;
+		Texture* createTexture(const char* file, int line, const char* func) const;
+		Texture *createTexture(jImage *image, int flags, const char* file, int line, const char* func) const;
+		Texture* createTexture2D(const jString& path, int flags, const char* file, int line, const char* func);
+		Texture *createTexture2D(const char* file, int line, const char* func) const;
+		Texture* createTexture2D(int width, int height, TEXTURE_FORMAT format, int flags, const char* file, int line, const char* func) const;
+		Texture* createTexture2D(int width, int height, TEXTURE_FORMAT format, int flags, bool cache, const char* file, int line, const char* func) const;
+		Texture* createTexture3D(int w, int h, int depth, TEXTURE_FORMAT format, int flags, bool bUsedForRender, const char* file, int line, const char* func);
+		Texture *createTexture3D(int width, int height, int depth, TEXTURE_FORMAT format, int flags, const char* file, int line, const char* func) const;
+		Texture *createTextureCube(int width, int height, TEXTURE_FORMAT format, int flags, const char* file, int line, const char* func) const;
+		Texture *createTexture2DArray(int width, int height, int num_layers, TEXTURE_FORMAT format, int flags, const char* file, int line, const char* func) const;
+		TextureImage *createTextureImage(const jImage &image, int flags, const char* file, int line, const char* func) const;
+		TextureRender *createTextureRender2D(int width, int height, int flags, const char* file, int line, const char* func) const;
+		TextureRender *createTextureRender3D(int width, int height, int depth, int flags, const char* file, int line, const char* func) const;
+		TextureRender *createTextureRenderCube(int width, int height, int flags, const char* file, int line, const char* func) const;
+		TextureRender *createTextureRender2DArray(int width, int height, int num_layers, int flags, const char* file, int line, const char* func) const;
+		Mesh *createMesh(const char* file, int line, const char* func) const;
+		MeshDynamic* createMeshDynamic(bool dynamic, const char* file, int line, const char* func);
+		MeshSkin* createMeshSkin(const char* file, int line, const char* func);
+		Billboards *createBillboards(const char* file, int line, const char* func) const;
+		Particles *createParticles(const char* file, int line, const char* func) const;
+		UIPainter* createUI(const jString& name, const char* file, int line, const char* func) const;
+		Query* createQuery(const char* file, int line, const char* func);
+		StructuredBuffer* createStructuredBuffer(const char* file, int line, const char* func)const;
+		void clear(){}
+		virtual void release(){}
+	}
+	```
+
+3. RenderSurface
+4. RExec 真正渲染流程
+	```c++
+	class RExec
+	{
+		virtual void beginFrame();
+		virtual void endFrame();
+		virtual void renderViewport(World* world, Render::RenderCaller* caller, bool run_game = true, const vec4& scissor_rect = vec4(0, 0, 1, 1));
+	}
+	```
+5. RLights
+6. RPost
+7. RScene
+8. RState
+9. Visualizer
 
 
-```c++
-//各种渲染资源的创建
-class RenderManager
-{
-	virtual RHIViewport* createViewport(IApp* wnd, const char* file, int line, const char* func) const;
-	Render *createRender(const char* file, int line, const char* func) const;
-	Shader *createShader(const char* file, int line, const char* func) const;
-	RenderTarget* createRenderTarget(int w, int h, int flags, const char* file, int line, const char* func) const;
-	Sampler* createSampler(int flags, int unit, const char* file, int line, const char* func) const;
-	Texture* createTexture(const char* file, int line, const char* func) const;
-	Texture *createTexture(jImage *image, int flags, const char* file, int line, const char* func) const;
-	Texture* createTexture2D(const jString& path, int flags, const char* file, int line, const char* func);
-	Texture *createTexture2D(const char* file, int line, const char* func) const;
-	Texture* createTexture2D(int width, int height, TEXTURE_FORMAT format, int flags, const char* file, int line, const char* func) const;
-	Texture* createTexture2D(int width, int height, TEXTURE_FORMAT format, int flags, bool cache, const char* file, int line, const char* func) const;
-	Texture* createTexture3D(int w, int h, int depth, TEXTURE_FORMAT format, int flags, bool bUsedForRender, const char* file, int line, const char* func);
-	Texture *createTexture3D(int width, int height, int depth, TEXTURE_FORMAT format, int flags, const char* file, int line, const char* func) const;
-	Texture *createTextureCube(int width, int height, TEXTURE_FORMAT format, int flags, const char* file, int line, const char* func) const;
-	Texture *createTexture2DArray(int width, int height, int num_layers, TEXTURE_FORMAT format, int flags, const char* file, int line, const char* func) const;
-	TextureImage *createTextureImage(const jImage &image, int flags, const char* file, int line, const char* func) const;
-	TextureRender *createTextureRender2D(int width, int height, int flags, const char* file, int line, const char* func) const;
-	TextureRender *createTextureRender3D(int width, int height, int depth, int flags, const char* file, int line, const char* func) const;
-	TextureRender *createTextureRenderCube(int width, int height, int flags, const char* file, int line, const char* func) const;
-	TextureRender *createTextureRender2DArray(int width, int height, int num_layers, int flags, const char* file, int line, const char* func) const;
-	Mesh *createMesh(const char* file, int line, const char* func) const;
-	MeshDynamic* createMeshDynamic(bool dynamic, const char* file, int line, const char* func);
-	MeshSkin* createMeshSkin(const char* file, int line, const char* func);
-	Billboards *createBillboards(const char* file, int line, const char* func) const;
-	Particles *createParticles(const char* file, int line, const char* func) const;
-	UIPainter* createUI(const jString& name, const char* file, int line, const char* func) const;
-	Query* createQuery(const char* file, int line, const char* func);
-	StructuredBuffer* createStructuredBuffer(const char* file, int line, const char* func)const;
-	void clear(){}
-	virtual void release(){}
-}
-```
-
-class Visualizer可能是渲染节点列表树的?
-
-RExec真正渲染
-```c++
-class RExec
-{
-	virtual void beginFrame();
-	virtual void endFrame();
-	virtual void renderViewport(World* world, Render::RenderCaller* caller, bool run_game = true, const vec4& scissor_rect = vec4(0, 0, 1, 1));
-}
-```
 
 RenderSurface
 
 ### script
+
 ### texture
+
+1. Texture 对显卡纹理对象的封装,派生出GL DX版本
+	```c++
+	class Texture
+	{
+		jString m_name;
+		Sampler* m_sampler;
+		TEXTURE_TYPE m_type;				// type
+		TEXTURE_FORMAT m_format;				// format
+		int m_flags;				// flags
+		int m_offset;				// offset
+
+		int m_width;				// size
+		int m_height;
+		int m_depth;
+
+		int m_num_mipmaps;		// number of mipmaps
+		int m_num_layers;			// number of layers
+
+		uint64 m_memory_usage;	// memory usage
+		J_PROPERTY_REF(jString, m_tag, Tag);
+
+		// create texture
+		virtual bool create(jImage* image, int flags = TEXTURE_DEFAULT_FLAGS, TEXTURE_LOAD_MODE mode = TEXTURE_LOAD_NORMAL, int flush_speed = 256, bool pooled = false) = 0;
+		//cache用于提前分配显存，目前针对gl
+		virtual bool create2D(int width, int height, TEXTURE_FORMAT format, int flags = TEXTURE_DEFAULT_FLAGS, bool cache = false) = 0;
+		virtual bool create3D(int width, int height, int depth, TEXTURE_FORMAT format, int flags = TEXTURE_DEFAULT_FLAGS) = 0;
+		virtual bool createCube(int width, int height, TEXTURE_FORMAT format, int flags = TEXTURE_DEFAULT_FLAGS) = 0;
+		virtual bool create2DArray(int width, int height, int num_layers, TEXTURE_FORMAT format, int flags = TEXTURE_DEFAULT_FLAGS) = 0;
+		//通过GPU生成mipmap，仅需level 0有数据，其他部分GPU自己处理
+		virtual bool createMipmaps() = 0;
+		// load texture
+		virtual bool load(const jString& name, int flags = TEXTURE_DEFAULT_FLAGS) = 0;
+		// image texture
+		virtual bool setImage(jImage *image) = 0;
+		virtual bool getImage(jImage *image) = 0;
+		virtual void clear(bool pooled = false) = 0;
+		virtual void release() = 0;
+
+		// texture format
+		TEXTURE_FORMAT getFormat() const;
+		virtual const char *getFormatName() const;
+		virtual bool isColorFormat() const;
+		virtual bool isDepthFormat() const;
+		virtual bool isDepthStencilFormat() const;
+
+		// texture size
+		int getWidth() const;
+		int getHeight() const;
+		int getDepth() const;
+		int getNumMipmaps() const;
+		int getNumLayers() const;
+
+	};
+	```
+2. TextureImage Texture和Image的绑定,用于从Image创建Texture，UI用的多
+	```c++
+	class TextureImage
+	{
+		Texture* m_texture;
+		jImage* m_image;
+	}
+	```
+3. TextureObject 看起来是TextureImage的另一种封装方式，或者再封装，主要还是Texture和Image 数据的绑定 glTexImagexD glTexSubImage glCopyTexImage2D glTextureStoragexD
+4. TextureManger 管理需要更新的纹理列表
+   ```c++
+   class TextureManager
+   {
+	private:
+		jMap<jString, FlagDatas> m_data;
+		J_PROPERTY(float, m_create_time_limit, CreateTimeLimit);
+		float m_elapse_time;
+		bool m_can_create;
+		jSet<Texture*> m_textures_to_update;
+
+	public:
+		void addUpdateTexture(Texture* p) { m_textures_to_update.append(p); }
+		bool removeUpdateTexture(Texture* p) { return m_textures_to_update.remove(p); }
+		const jSet<Texture*>& getUpdateTexture()const { return m_textures_to_update; }
+   }
+   ```
+5. TextureRender 渲染纹理，用于封装glFramebufferTexture glFramebufferRenderbuffer
+	```c++
+	class TextureRender
+	{
+	protected:
+		Texture* m_default_color_texture;
+		Texture* m_default_depth_texture;
+		RenderTarget* m_rendertarget;
+	public:
+		void unbindColorTexture(int slot = INVALID_INDEX);
+		void unbindDepthTexture();
+		void unbindAll();
+	public:
+		// color texture
+		virtual void setColorTexture(int slot, Texture *texture, int layer = INVALID_INDEX, bool dummy = false);
+		virtual Texture *getColorTexture(int slot) const;
+
+		// depth texture
+		virtual void setDepthTexture(Texture *texture, int layer = INVALID_INDEX);
+		virtual Texture *getDepthTexture() const;
+		virtual void setLayer(int layer);
+
+		// render texture status
+		virtual int isEnabled() const;
+		// set render texture
+		virtual void useDepth();
+		virtual void clearBuffer(int buffer, const float* color = 0, float depth = Z_FAR, int stencil = 0);
+		virtual void enable(bool bind_pass = true);
+		virtual void disable();
+		//Resolve to textures
+		virtual void resolve();
+		virtual uint64 getMemoryUsage() const;
+	}
+	```
+6. RenderTarget 渲染目标，用于渲染到纹理 实现应该是调用了TextureRender
+   ```c++
+   class RenderTarget
+   {
+		virtual void setColorTexture(int slot, Texture* texture, int layer = -1, bool dummy = false) = 0;
+		virtual Texture* getColorTexture(int slot) const = 0;
+
+		virtual void setDepthTexture(Texture* texture, int layer = -1) = 0;
+		virtual Texture* getDepthTexture() const = 0;
+		virtual void setLayer(int layer) = 0;
+		virtual void useDepth() = 0;
+		virtual void clearBuffer(int buffer, const float* color = 0, float depth = Z_FAR, int stencil = 0) = 0;
+		virtual void enable(bool bind_pass = true) = 0;
+		virtual void disable() = 0;
+		virtual void resolve() = 0;
+		virtual void release() = 0;
+	}
+   ```
+
+
 ### track
 
 Track应该是动画的容器?
+
+1. Track
+2. TrackReg 定义不同数据的Track注册
+3. TrackParameter
 
 ### ui
 ```c++
@@ -1102,7 +1343,9 @@ TerrainNode
 9.  .prefab预制体配置文件可以看做是一个小的.world文件，里面包含多个节点，可以嵌套，可以包含多个surface，可以包含多个node
 
 
-# IR.h扩展 
+
+# 使用&开发
+## IR.h扩展 
 data\core\shaders\common\ir.h
 data\core\shaders下可以修改shader代码
 修改block后，可以在材质蓝图里添加这段代码 从而修改材质
@@ -1111,16 +1354,38 @@ TEXTURE返回的值是float4
 
 材质里纹理使用名称索引，shader里使用id，id咋设置?
 
-# 使用
+
+1.5.0.3作为红外开发的基础版本，保留  
+1.5.1-win 作为浮点mask导入的基础版本  新建world模板有问题，需要修改
+1.5.1-win-2 是浮点纹理导出版本
+
+修改的地方:
+1. data\core\materials\generate\block.cfg修改蓝图材质节点类型,添加了math.ir2
+2. data\core\shaders\common\ir.h 修改红外测试代码 主要两个测试方法 一是T-L表,二是温度直接归一化
+3. frustum j20 sanya_test是mesh的红外材质等
+4. 自动化生成的obj是blender翻转之后的模型
+5. 圆台 飞机 地形是三个mesh 父材质是DefaultMeshIR4Test2.mat 实例在对应的materials\xxx.mat
+6. 模板使用DefaultMeshIR4Test2.mat 地形使用DefaultTerrainIR.mat
+7. base_world是为了展示地球+飞机的红外
+8. 1.5.1添加了浮点纹理导入功能 需要先导入一个mask_32f的配置 然后添加纹理 纹理似乎处理了，不知道影不影响精度，~~纹理导入不确定成功了没有 uv32的纹理坐标好像也没只作用在指定区域~~
+9. 1.5.1导入浮点mask成功了，显示单通道的红色，必须用引擎的材质模板，使用uvmask32f uvmask32fparent成对使用
+10. 1.5.1 1.5.1-win-2新建地形的模板有问题，貌似还是没搞定
+11. 地形不能使用模型那种uv输入给ir的形式，因为地形的uv是变化的?需要直接使用输出的xyzw颜色值给到ircolor，所以需要用ir的功能替换math.lerp
+12. 四通道result.dds 4096可以读入，需要修改ir.h的y通道
+
+## 使用
 添加地球节点时，必须有earth文件夹及下面的文件
 
-可以新建世界，然后添加地球节点
+可以新建世界(编辑器里菜单栏新建)，然后添加地球节点
 
 可以建一个dummy节点，指定经纬度，这样可以快速回到特定位置
 
 鼠标加键盘进行导航，比单独鼠标要靠谱
 
 地球无法直接绑定mesh的材质
+
+project项目作为demo不断添加新的演示功能 AppWindow.cpp本身就乱码了
+
 
 # TODO
 1. ~~node world等场景组织 然后是场景数据~~
@@ -1160,3 +1425,16 @@ GameTerrain::update_input轮询或者本身提供的事件响应函数被动响�
 getEllipsoidModel 获取地球模型
 
 引擎视频1h40min ig飞控
+
+
+- [] Engine
+- [] Render
+- [x] Texture
+  - [x] Sampler
+  - [x] TextureImage
+  - [x] TextureRender
+  - [x] RenderTexture
+  - [x] RenderTarget
+  - [x] TextureManager
+  - [x] TextureObject
+- [] Track
