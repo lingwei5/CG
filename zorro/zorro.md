@@ -1065,13 +1065,14 @@ class Environment
  * dom数字正射纹理数据
  * lightmap光照贴图
  * mask遮罩图(用于区分地表、水面、植被等)
+ * 派生出ObjectEarth ObjectMoon
  */
 class ObjectTerrain
 {
 	int m_num_triangles;
 	int m_num_dips;
 	Terrain* m_terrain;
-	TerrainNode* m_root[CUBE_FACE_MAX];
+	TerrainNode* m_root[CUBE_FACE_MAX];//整个地形数据的6个根节点，每个根节点对应一个立方体面
 	J_PROPERTY(int, m_min_render_lod, MinRenderLod);
 	J_PROPERTY(int, m_max_render_lod, MaxRenderLod);
 	const EllipsoidModel* m_ellipsoid;
@@ -1083,8 +1084,18 @@ class ObjectTerrain
 	TerrainLoader* m_tile_loader_mask;
 
 	bool setDataPath(const jString& cfg);//earth.cfg 地形数据库文件
-}
 
+
+protected:
+	TerrainTexturePool* m_texture_pool;
+	TerrainMemPool* m_image_pool;
+	TerrainMemPool* m_patches_verts_pool;
+	TerrainMemPool* m_patches_verts_world_pool;
+	TerrainMemPool* m_patches_bbs_pool;
+
+protected:
+	static Node* create_node(int tp, const char* file, int line, const char* func);
+}
 
 class TerrainLoader
 {
@@ -1092,6 +1103,7 @@ class TerrainLoader
 	Tvolatile int m_lock;
 	ObjectTerrain* m_object;
 }
+```
 
 派生出四个子类，对应dem dom lightmap mask的加载
 TerrainLoaderDem
@@ -1099,12 +1111,212 @@ TerrainLoaderDom
 TerrainLoaderLightmap
 TerrainLoaderMask
 
-TerrainLod
-TerrainTexture
-TerrainNode
+```c++
+/**
+地形LOD的核心实现
+这个类是地形渲染系统的核心，主要负责：
+
+地形LOD的管理和计算
+不同类型纹理的尺寸控制
+坐标系的转换
+地形块的索引和查找
+它采用了立方体贴图的方式来组织地形数据，支持多级LOD，并提供了完整的纹理管理策略，是一个功能完整的地形LOD系统实现。
+*/
+class TerrainLod
+{
+	//地形块的索引
+	struct Key
+	{
+		//对应地形数据中的dom/dem/lightmap/mask文件夹下的6个文件
+		// data_px.ter data_nx.ter data_py.ter data_ny.ter data_pz.ter data_nz.ter
+		CUBE_FACE face;
+		char lod;
+		int x;
+		int y;
+	};
+
+	//项目设置中 地形选项卡里的dom lightmap mask的纹理尺寸
+	//每个LOD级别对应的纹理数据的像素尺寸 0~8192
+	struct SizeStrategy
+	{
+		int size_lod_0;
+		int size_lod_4;
+		int size_lod_8;
+		int size_lod_12;
+		int size_lod_16;
+	};
+
+public:
+	static SizeStrategy* GetSizeStrategyDom();
+	static SizeStrategy* GetSizeStrategyLightmap();
+	static SizeStrategy* GetSizeStrategyMask();
+
+public:
+	static void GetFaceRange(CUBE_FACE face, dvec3& ret_range_min, dvec3& ret_range_max);//获取立方体投影中某个面的地理范围
+	static void GetTerrainRange(CUBE_FACE face, char lod, int x, int y, dvec3& ret_range_min, dvec3& ret_range_max);//获取某个立方体面对应的lod层级的xy坐标块对应的地理范围
+	static void GetTerrainRangeRect(CUBE_FACE face, char lod, int x, int y, dvec3 ret_range[QUAD_TREE_MAX]);
+	static dvec3 ConvertLocalXYToFaceSpace(CUBE_FACE face, double x, double y);//将立方体某个面删的二维局部坐标转换为立方体面空间坐标
+
+public://地形块(瓦片)相关api
+	INLINE static int GetTerrainNum(char lod) { return 1 << lod; }//计算lod级别下地形块的数量,瓦片数量
+	INLINE static double GetTerrainSize(char lod) { return EARTH_BOX_SIZE/ GetTerrainNum(lod); }
+	INLINE static float GetLODPixelRealSize(char lod)
+	{
+		return 0.5 * (1 << (TERRAIN_MAX_LOD - lod));
+	}
+	//计算一个patch的实际大小，单位米
+	//如lod20为8x8米，lod19为16x16米
+	INLINE static float GetLODPatchRealSize(char lod)
+	{
+		return GetLODPixelRealSize(lod) * (TERRAIN_SIZE - 1);
+	}
+
+public://dom纹理相关api
+	static int GetDOMTextureSize(char lod);
+	static int GetDOMLodByPrecision(float src_pixel_precision);
+	//计算dom期望的一个像素代表的实际距离，单位米
+	static float GetDOMExpectedPixelSize(char lod);
+	//根据源图像的像素精度，计算应该使用的dom大小，单位米
+	static int GetDOMAdjustSize(char lod, float src_pixel_precision);
+
+public://lightmap纹理相关api
+	static int GetLightmapTextureSize(char lod);
+	static int GetLightmapLodByPrecision(float src_pixel_precision);
+	static float GetLightmapExpectedPixelSize(char lod);
+	static int GetLightmapAdjustSize(char lod, float src_pixel_precision);
+
+public://mask纹理相关api
+	static int GetMaskTextureSize(char lod);
+	//计算dom期望的一个像素代表的实际距离，单位米
+	static float GetMaskExpectedPixelSize(char lod);
+	//根据源图像的像素精度，计算应该使用的dom大小，单位米
+	static int GetMaskAdjustSize(char lod, float src_pixel_precision);
+	static int GetMaskLodByPrecision(float src_pixel_precision);
+}
 ```
 
-派生出ObjectEarth ObjectMoon
+```c++
+//对应立方体六个面的地形文件
+class TerrainFile
+{
+	QuadtreeFile* m_file[CUBE_FACE_MAX];
+
+public:
+	bool init(const jString& cfg_path, const jString& pkg_group_name, TERRAIN_USAGE usage);
+	void release();
+
+public:
+	QuadtreeFile* getFile(CUBE_FACE face) { return m_file[face]; }//应该是对应一个.ter文件
+}
+
+class TerrainFileGroup//把dem dom lightmap mask放在一起作为一个整体
+{
+	TerrainFile* m_dem;
+	TerrainFile* m_dom;
+	TerrainFile* m_lightmap;
+	TerrainFile* m_mask;
+	TerrainFile* m_mask_32f;
+	J_PROPERTY_READONLY_REF(jString, m_path, Path);
+public:
+	TerrainFileGroup();
+	virtual ~TerrainFileGroup(){}
+public:
+	bool init(const jString& cfg_path);
+	void release();
+public:
+	bool isDemLodAllowed(int lod)const;
+	bool isDomLodAllowed(int lod) const;
+	bool isLightmapLodAllowed(int lod) const;
+	bool isLightmapInit() const;
+	bool isMaskLodAllowed(int lod) const;
+	bool isMaskInit() const;
+	bool isMask32fLodAllowed(int lod) const;
+	bool isMask32fInit() const;
+
+	QuadtreeFile* getDEMQuadFile(CUBE_FACE face);
+	QuadtreeFile* getDOMQuadFile(CUBE_FACE face);
+	QuadtreeFile* getLightmapQuadFile(CUBE_FACE face);
+	QuadtreeFile* getMaskQuadFile(CUBE_FACE face);
+	QuadtreeFile* getMask32fQuadFile(CUBE_FACE face);
+
+	INLINE TerrainFile* getDEMTerrainFile() { return m_dem; }
+	INLINE TerrainFile* getDOMTerrainFile() { return m_dom; }
+	INLINE TerrainFile* getLightmapTerrainFile() { return m_lightmap; }
+	INLINE TerrainFile* getMaskTerrainFile() { return m_mask; }
+	INLINE TerrainFile* getMask32fTerrainFile() { return m_mask_32f; }
+};
+```
+TerrainTexture
+```c++
+class TerrainNode//基于四叉树的地形数据管理结构
+{
+	J_PROPERTY(ObjectTerrain*, m_object, Object);//地形节点对应的ObjectTerrain
+	J_PROPERTY(TerrainNode*, m_parent, Parent);
+	J_PROPERTY_READONLY_REF(TerrainKey, m_key, Key);
+	TerrainNode* m_child[QUAD_TREE_MAX];
+
+}
+
+class TerrainGeometry//地形块的几何数据 包围球
+{
+public:
+	static BoundSphere ComputeTerrainBoundSphere(const EllipsoidModel* e, CUBE_FACE face, char lod, int x, int y);
+	static dvec3 ComputeWGSPoint(const EllipsoidModel* e, const dvec3& any_world_pt);
+	static dvec2 ComputeUVFromLonLat(const EllipsoidModel* e, double lon, double lat);
+}
+```
+
+ObjectTerrain vs TerrainNode:  
+1. ObjectTerrain:
+   - 直接包含整个地形数据的6个根节点数据
+   - 地形系统的整体管理
+   - 资源加载 内存管理
+   - 数据加载(dem dom mask等),从界面加载指定的tif dds等文件,内部应该是调用create_node,递归生成TerrainNode
+   - 编辑器中设置一些属性
+2. TerrainNode:
+   - 具体地形块的数据管理
+   - 实现四叉树结构
+   - 子节点的创建和管理
+
+
+立方体贴图实现地形是一种将球面地形投影到立方体表面的技术，我来解释其核心原理：
+
+1. 基本概念：
+- 将地球表面投影到6个立方体面上（前后左右上下）
+- 每个面都是一个独立的坐标系，使用2D UV坐标表示位置
+- 通过LOD系统实现不同精度的地形细节
+
+1. 坐标系统：
+- 每个立方体面有独立的二维坐标系
+- 使用[TerrainLod.h](plugin-terrain\TerrainLod.h)中的Key结构体(face, lod, x, y)唯一标识每个地形块
+- 通过ConvertLocalXYToFaceSpace方法在局部坐标和面空间之间转换
+
+1. LOD实现：
+- 使用四叉树结构组织地形块
+- 每个LOD级别对应不同的分辨率（如LOD 0最低，LOD 16最高）
+- 通过GetTerrainNum和GetTerrainSize计算不同LOD下的块数和大小
+
+1. 具体实现步骤：
+- 将球面划分为6个面
+- 每个面使用二维坐标系统
+- 根据视距选择合适的LOD级别
+- 动态加载和卸载地形块
+- 使用多个纹理层（DOM、Lightmap、Mask等）增强细节
+
+1. 优势：
+- 避免了球面坐标的极点问题
+- 更容易实现LOD和纹理管理
+- 便于进行地形块的分页加载
+- 支持无缝的细节过渡
+
+1. 关键技术点：
+- 坐标转换（球面到立方体面）
+- LOD过渡处理
+- 边界拼接
+- 纹理管理
+- 视锥剔除
+
+这种实现方式在游戏和GIS系统中广泛应用，能够高效地处理大规模地形数据，同时保持良好的渲染性能。
 
 # 各种配置文件
 
@@ -1345,6 +1557,10 @@ TerrainNode
 
 
 # 使用&开发
+使用的demo主要是AppQt AppSnapshot
+
+![引擎LOD数字越大细节越多,金字塔塔尖是0级](引擎LOD数字越大细节越多.png)
+
 ## IR.h扩展 
 data\core\shaders\common\ir.h
 data\core\shaders下可以修改shader代码
@@ -1386,6 +1602,159 @@ TEXTURE返回的值是float4
 
 project项目作为demo不断添加新的演示功能 AppWindow.cpp本身就乱码了
 
+导入地形数据，如果模糊，可以修改项目设置,增加地形设置中dom各级lod的图片尺寸，然后重新导入dom数据
+
+地形数据可以在硬盘上有一个固定位置，数据库索引到这个绝对路径即可  
+新建地形时的全局索引是哪个，貌似需要一直是哪个，注掉就不显示地形了?
+
+## Texture获取及更新
+1. Object ObjectPrefab获取Texture
+	```c++
+	// 1. 从引擎获取World
+	// 使用宏定义获取Engine实例和GameWorld
+	World* world = GET_GAME_WORLD;  // 等价于 Engine::get()->getGameWorld()
+
+	// 2. 从World获取Node
+	// 通过名称获取Node
+	Node* node = world->getNodeByName("node_name");
+
+	// 通过标签获取Node
+	Node* node = world->getNodeByTag("node_tag");
+
+	// 通过ID获取Node
+	Node* node = world->getNodeByID(node_id);
+
+
+	//3. 从Node获取Object,再获取Texture
+	//3.1 
+	// 将Node转换为Object（如果是Object类型的节点）
+	Object* obj = dynamic_cast<Object*>(node);
+	if (obj) {
+		// 获取Material
+		Material* material = obj->getMaterial();
+		
+		// 从Material获取Texture
+		// 通过名称获取纹理
+		Texture* texture = material->getTexture(RENDER_PASS_TYPE_NORMAL, "texture_name", 0);
+		
+		// 或者通过ID获取纹理
+		Texture* texture = material->getProceduralTexture(texture_id);
+		
+		// 或者获取所有纹理
+		const jVector<MaterialTexture*>& textures = material->getMaterailTextures();
+		for (auto mt : textures) {
+			Texture* tex = mt->get();
+		}
+	}
+
+	//3.2
+	// 3.2.1 如果Object有多个Surface，可以获取特定Surface的Material
+	Object* obj = dynamic_cast<Object*>(node);
+	if (obj) {
+		Material* material = obj->getSurfaceMaterial(surface_index);
+		// 然后同上获取Texture
+	}
+
+	//3.2.2 ObjectPrefab
+		ObjectPrefab* np = dynamic_cast<ObjectPrefab*>(node);
+		////如果ObjectPrefab是延迟加载的，强制加载
+		//if (np->isDeferredLoad())
+		//{
+		//	np->load();
+		//}
+		//获得根节点，每个ObjectPrefab有且只能有一个根节点
+		Node* root = np->getRoot();
+		JCHECK_ASSERT(root);
+		jVector<Node*> children;
+		//找到所有子节点
+		root->getHierarchy(children);
+		for (int i = 0; i < children.size(); i++)
+		{
+			Node* child = children[i];
+			//找到子节点中是Object的节点
+			if (child->isObject() == false ||
+				child->getName() != "DEM_sanya_20km_30m")
+			{
+				continue;
+			}
+			Object* obj = (Object*)child;
+			//获得第一个surface的材质
+			Material* mat = obj->getSurfaceMaterial(0);
+			if (mat == 0)
+			{
+				continue;
+			}
+			//根据材质编辑中的贴图的tag找到贴图
+			Material::MaterialTexture* mt = mat->getMaterailTextureByTag("_TemperatureTex2");
+			if (mt == 0)
+			{
+				continue;
+			}
+			//加载一张图片
+			jImage img;
+			if (!img.load("data/sanya_test/textures/result.dds"))
+			{
+				continue;
+			}
+			////根据图片创建贴图，并设置给材质，自己创建的贴图要自己删除释放资源，而材质自带的贴图不用删除，引擎内部自动管理
+			////因此，这个tex需要后面自己删除掉，使用jDestroy0(tex);
+			//Texture* tex = GET_RENDERMNGR->createTexture(img, mt->flags, LINE_INFO);
+			//if (tex)
+			//{
+			//	mt->texture = tex;
+			//	m_tex_to_destory.append(tex);
+			//}
+			//jImage* img;
+			float cur_temp = tc.getTemperature("mud", mat_counter++);
+			{
+				jImage::Pixel pix;
+				for(int y=0;y<4096;y++)
+					for (int x = 0; x < 4096; x++)
+					{
+						jImage::Pixel old = img.get2D(x, y);
+						//printf("pix.f.r = %f\n", pix.f.r);
+						//printf("old val %f\n", old.f.r);
+						//if (pix.f.r == 1)
+						if(old.f.r==1)
+						{
+						
+							
+							//pix.f.r = 1.0;
+							pix.f.g = cur_temp;
+							//pix.f.b = 1.0;
+							//pix.f.a = 1.0;
+							img.set2D(x, y, pix);
+						}
+					
+					}
+			}
+			printf("%d cur time temperature: %f \n", mat_counter-1,cur_temp);
+			//img.create2D(4096, 4096, IMAGE_FORMAT_RGBA32F);
+			if(TEXTURE_FORMAT_RGBA32_FLOAT != mt->texture->getFormat())
+				printf("not rgba32f\n");
+			if (IMAGE_FORMAT_RGBA32F != mt->texture->TextureFormatToImageFormat(mt->texture->getFormat()))
+				printf("not image rgba32f\n");
+			
+			mt->texture->create(&img, TEXTURE_FLAG::FILTER_BILINEAR | TEXTURE_FLAG::WRAP_CLAMP);
+		}
+
+
+
+	```
+
+2. ObjectTerrain获取Texture 包括mask mask32f,地形数据是预先生成保存在硬盘的，需要切换数据库，无法像模型一样动态更新
+
+通过修改cpu端的jImage对象，jImage可以通过遍历jImage::Pixel进行修改
+然后把地址传给Texture的create，完成纹理更新
+Texture 通过jImage得到纹理数据 jImage的格式有可能跟Texture的格式不一样，需要判断，不一样的话就得生成新的jImage对象，然后循环update完再给texture去create，如果一样则可以从tex->getimage得到jImage对象，直接修改即可
+```c++
+jImage img;
+tex->getImage(&img);
+
+//
+jImage img;
+img.load("data/sanya_test/textures/result.dds");
+```
 
 # TODO
 1. ~~node world等场景组织 然后是场景数据~~
@@ -1396,7 +1765,7 @@ project项目作为demo不断添加新的演示功能 AppWindow.cpp本身就乱�
 6. engine是干啥的 把所有的搞一起，就是editor?应该引擎是引擎 编辑器是编辑器
 7. RenderManager
 8. RHIViewport
-9. block.cfg中的block如何与.h .cpp关联的?
+9. ~~block.cfg中的block如何与.h .cpp关联的?block的变量作为函数调用的参数~~
 
 Node
 World
@@ -1438,3 +1807,6 @@ getEllipsoidModel 获取地球模型
   - [x] TextureManager
   - [x] TextureObject
 - [] Track
+- [] ocean
+- [] partical
+
