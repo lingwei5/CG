@@ -458,7 +458,8 @@ BodyRigid
 
 
 ### render
-1. RHIViewport 渲染的接口
+1. Render
+2. RHIViewport 渲染的接口
 	```c++
 	//派生类有D3D11Viewport，GLViewport, 是图形api上下文的抽象 HDC HGLRC
 	class RHIViewport
@@ -477,7 +478,7 @@ BodyRigid
 	}
 	```
 
-2. RenderManager
+3. RenderManager
 	```c++
 	//各种渲染资源的创建
 	class RenderManager
@@ -515,8 +516,8 @@ BodyRigid
 	}
 	```
 
-3. RenderSurface
-4. RExec 真正渲染流程
+4. RenderSurface
+5. RExec 真正渲染流程
 	```c++
 	class RExec
 	{
@@ -525,11 +526,12 @@ BodyRigid
 		virtual void renderViewport(World* world, Render::RenderCaller* caller, bool run_game = true, const vec4& scissor_rect = vec4(0, 0, 1, 1));
 	}
 	```
-5. RLights
-6. RPost
-7. RScene
-8. RState
-9. Visualizer
+6. RLights
+7. RClouds
+8. RPost
+9. RScene
+10. RState
+11. Visualizer
 
 
 
@@ -735,6 +737,31 @@ protected:
 }
 ```
 
+```c++
+class UIPainter
+{
+	protected:
+	jVector<dmat4> m_transforms;
+	J_PROPERTY_REF(vec4, m_default_color, DefaultColor);
+	J_PROPERTY_REF(vec4, m_focused_color, FocusedColor);
+	J_PROPERTY_REF(vec4, m_disabled_color, DisabledColor);
+	J_PROPERTY_REF(vec4, m_transparent_color, TransparentColor);
+	J_PROPERTY_REF(vec4, m_tooltip_color, ToolTipColor);
+protected:
+	J_PROPERTY(int, m_font_size, FontSize);
+	J_PROPERTY_REF(vec4, m_font_color, FontColor);
+	struct Skin
+	{
+		jString name;							// skip name
+		TextureImage* textures[NUM_TEXTURES];	// skin textures
+		void release() { jMath::memset(textures, 0, sizeof(TextureImage*) * NUM_TEXTURES); }
+	};
+	Skin* m_skin;
+	FontTTF* m_font;
+	jString m_ui_dir;
+}
+```
+
 ### world
 
 ```c++
@@ -877,6 +904,38 @@ private:
 1. GameWorld GameSystem IApp
 2. Camera World MaterialManager ImageManager TextureManager SoundManager MeshManager MeshSkinManager MeshDynamicManager ScriptManager Globals
 3. PackageManager FileSystem EngineThreads Visualizer
+4. 
+
+```c++
+#define GET_ENGINE Engine::get()
+#define GET_APP GET_ENGINE->getApp()
+#define GET_UIPAINTER GET_ENGINE->getUIPainter()
+#define GET_GAME_WORLD GET_ENGINE->getGameWorld()
+#define GET_GAME_SYSTEM GET_ENGINE->getGameSystem()
+#define GET_IMAGEMNGR GET_ENGINE->getImageManager()
+#define GET_MATMNGR GET_ENGINE->getMatManager()
+#define GET_SNDMNGR GET_ENGINE->getSoundManager()
+#define GET_RENDERMNGR GET_ENGINE->getRenderManager()
+#define GET_RENDER GET_ENGINE->getRender()
+#define GET_FRAMECNT GET_ENGINE->getFrameCount()
+#define GET_FILESYS GET_ENGINE->getFileSystem()
+#define GET_GUI GET_ENGINE->getGui()
+#define GET_GLOBALS GET_ENGINE->getGlobals()
+#define GET_TEXMNGR GET_ENGINE->getTextureManager()
+#define GET_PROFILE_COLLECTOR GET_ENGINE->getProfileCollector()
+#define GET_MESHMNGR GET_ENGINE->getMeshManager()
+#define GET_MESH_SKIN_MNGR GET_ENGINE->getMeshSkinManager()
+#define GET_PKGMNGR GET_ENGINE->getPackageManager()
+#define GET_ATLASMNGR GET_ENGINE->getAtlasManager()
+#define GET_MESH_DYNAMIC_MNGR GET_ENGINE->getMeshDynamicManager()
+#define GET_CURRENT_GUI GET_ENGINE->getCurrentGui()
+#define GET_VL GET_ENGINE->getVisualizer()
+#define GET_EXPS GET_ENGINE->getExpressionManager()
+#define GET_PROFILE_GRAPH GET_ENGINE->getProfileGraph()
+#define GET_TASK_MNGR GET_ENGINE->getTaskManager()
+#define GET_SCRIPT GET_ENGINE->getScriptManager()
+```
+
 ```c++
 class Engine
 {
@@ -1053,6 +1112,13 @@ class Environment
 ```
 
 ### plugin-ocean
+
+```c++
+class ObjectOcean
+{
+	
+}
+```
 
 ### plugin-osm
 街道河流道路等等矢量数据 .shp文件吧
@@ -1282,39 +1348,39 @@ ObjectTerrain vs TerrainNode:
 立方体贴图实现地形是一种将球面地形投影到立方体表面的技术，我来解释其核心原理：
 
 1. 基本概念：
-- 将地球表面投影到6个立方体面上（前后左右上下）
-- 每个面都是一个独立的坐标系，使用2D UV坐标表示位置
-- 通过LOD系统实现不同精度的地形细节
+   - 将地球表面投影到6个立方体面上（前后左右上下）
+   - 每个面都是一个独立的坐标系，使用2D UV坐标表示位置
+   - 通过LOD系统实现不同精度的地形细节
 
-1. 坐标系统：
-- 每个立方体面有独立的二维坐标系
-- 使用[TerrainLod.h](plugin-terrain\TerrainLod.h)中的Key结构体(face, lod, x, y)唯一标识每个地形块
-- 通过ConvertLocalXYToFaceSpace方法在局部坐标和面空间之间转换
+2. 坐标系统：
+   - 每个立方体面有独立的二维坐标系
+   - 使用[TerrainLod.h](plugin-terrain\TerrainLod.h)中的Key结构体(face, lod, x, y)唯一标识每个地形块
+   - 通过ConvertLocalXYToFaceSpace方法在局部坐标和面空间之间转换
 
-1. LOD实现：
-- 使用四叉树结构组织地形块
-- 每个LOD级别对应不同的分辨率（如LOD 0最低，LOD 16最高）
-- 通过GetTerrainNum和GetTerrainSize计算不同LOD下的块数和大小
+3. LOD实现：
+   - 使用四叉树结构组织地形块
+   - 每个LOD级别对应不同的分辨率（如LOD 0最低，LOD 16最高）
+   - 通过GetTerrainNum和GetTerrainSize计算不同LOD下的块数和大小
 
-1. 具体实现步骤：
-- 将球面划分为6个面
-- 每个面使用二维坐标系统
-- 根据视距选择合适的LOD级别
-- 动态加载和卸载地形块
-- 使用多个纹理层（DOM、Lightmap、Mask等）增强细节
+4. 具体实现步骤：
+   - 将球面划分为6个面
+   - 每个面使用二维坐标系统
+   - 根据视距选择合适的LOD级别
+   - 动态加载和卸载地形块
+   - 使用多个纹理层（DOM、Lightmap、Mask等）增强细节
 
-1. 优势：
-- 避免了球面坐标的极点问题
-- 更容易实现LOD和纹理管理
-- 便于进行地形块的分页加载
-- 支持无缝的细节过渡
+5. 优势：
+   - 避免了球面坐标的极点问题
+   - 更容易实现LOD和纹理管理
+   - 便于进行地形块的分页加载
+   - 支持无缝的细节过渡
 
-1. 关键技术点：
-- 坐标转换（球面到立方体面）
-- LOD过渡处理
-- 边界拼接
-- 纹理管理
-- 视锥剔除
+6. 关键技术点：
+   - 坐标转换（球面到立方体面）
+   - LOD过渡处理
+   - 边界拼接
+   - 纹理管理
+   - 视锥剔除
 
 这种实现方式在游戏和GIS系统中广泛应用，能够高效地处理大规模地形数据，同时保持良好的渲染性能。
 
@@ -1425,7 +1491,7 @@ ObjectTerrain vs TerrainNode:
 			}
 		}
 		```
-2. earth文件夹怎么来的 data文件夹下的地球数据库，eartch.cfg实际是一个数据库索引文件,通过一条条记录指向某个目录下的terrain.cfg，而terrain.cfg是个Package，记录了具体的dem dom lightmap数据
+2. earth文件夹怎么来的 data文件夹下的地球数据库，eartch.cfg实际是一个数据库索引文件,通过一条条记录指向某个目录下的terrain.cfg，而terrain.cfg是个Package，记录了具体的dem dom lightmap数据,这些只负责索引,具体的文件夹要手动创建并添加terrain.cfg文件
 3. editor.cfg定义了地形lod尺寸
 4. 菜单栏新建功能，会创建一个默认的世界场景，包含地球 月球 太阳，其中地球是ObjectTerrain类型，通过earth.cfg指定数据路径，里面再通过terrain.cfg指定具体的dem dom lightmap数据
 5. .mtl 跟.mat啥区别? .mtl是材质与shader的关联?
@@ -1561,6 +1627,50 @@ ObjectTerrain vs TerrainNode:
 
 ![引擎LOD数字越大细节越多,金字塔塔尖是0级](引擎LOD数字越大细节越多.png)
 
+exe的上级目录下有data文件夹即可
+通过管理员权限cmd的mklink命令行添加符号链接，打开cmd，定位到软连接所在的目录 mklink /D data c:\1.5.0.3\data\zorro\data
+
+GET_RENDER->setVisionMode(IG_VISION_IR);//修改渲染模式
+
+getEllipsoidModel 获取地球模型
+
+## 引擎执行流程
+1h07m开始讲述引擎执行流程  
+
+引擎运行应用程序的两种方式
+1. run(GameScene) GameScene框架
+2. 使用UI机制 UI框架  也可以通过UIROOT当做ui进行渲染;
+
+
+引擎渲染流程  
+Engine是一个全局单例 可以获取IApp等 
+- Engine
+  - IApp getApp
+  - UIPainter
+  - Render
+  - FileSystem
+  - World
+  - ImageManager
+  - TextureMananger
+  - MaterialManager
+  - RenderManager
+  - MeshManager
+  - Globals
+  - Visualizer
+  - GameWorld
+  - GameSystem
+  - app_path
+  - app_name
+  - app_dir
+IApp通过IGGameManager执行GameScene:
+1. IApp--->IGGameManager::get()->run(GameScene*); 
+2. 然后GameScene再去update render swap; 
+3. WindowManager/PlatformKit会将GameScene注入到IApp中
+4. 然后GameScene的子类(GameTerrain)会重写onClick等交互,里面会get_engine get_render等
+5. AppQt继承自IApp及QWidget，会有ControlApp Splash UIRoot
+6. GameTerrain派生自GameScene, update_input轮询或者本身提供的事件响应函数被动响应
+
+
 ## IR.h扩展 
 data\core\shaders\common\ir.h
 data\core\shaders下可以修改shader代码
@@ -1605,7 +1715,9 @@ project项目作为demo不断添加新的演示功能 AppWindow.cpp本身就乱�
 导入地形数据，如果模糊，可以修改项目设置,增加地形设置中dom各级lod的图片尺寸，然后重新导入dom数据
 
 地形数据可以在硬盘上有一个固定位置，数据库索引到这个绝对路径即可  
-新建地形时的全局索引是哪个，貌似需要一直是哪个，注掉就不显示地形了?
+新建地形时的全局索引是哪个，貌似需要一直是哪个，注掉就不显示地形了? 应该是得注意
+
+浮点纹理得拆成单通道的然后四个一组四个一组添加到mask32f，对应材质编辑器里的mask32f_0 mask32f_1 mask32f_2 mask32f_3,文件路径mask下的0 1 2 ...
 
 ## Texture获取及更新
 1. Object ObjectPrefab获取Texture
@@ -1758,14 +1870,15 @@ img.load("data/sanya_test/textures/result.dds");
 
 # TODO
 1. ~~node world等场景组织 然后是场景数据~~
-2. 引擎渲染流程 gamesystem gamescene gamewrold调用关系 world node renderwidget
-3. app接口
-4. debug一下appwin64的ui代码，看是不是跟renderwidget有关
-5. action是干啥的 应该是动画，demo里有CameraMoveTo派生类,生成关键帧的吧
-6. engine是干啥的 把所有的搞一起，就是editor?应该引擎是引擎 编辑器是编辑器
-7. RenderManager
-8. RHIViewport
-9. ~~block.cfg中的block如何与.h .cpp关联的?block的变量作为函数调用的参数~~
+2. GameSystem GameWorld调用关系貌似可以不设置
+3. World node renderwidget
+4. app接口
+5. debug一下appwin64的ui代码，看是不是跟renderwidget有关
+6. action是干啥的 应该是动画，demo里有CameraMoveTo派生类,生成关键帧的吧
+7. engine是干啥的 把所有的搞一起，就是editor?应该引擎是引擎 编辑器是编辑器
+8. RenderManager
+9. RHIViewport
+10. ~~block.cfg中的block如何与.h .cpp关联的?block的变量作为函数调用的参数~~
 
 Node
 World
@@ -1782,16 +1895,8 @@ Material
 
 Texture
 
-AppQt里会有ControlApp Splash UIRoot
 
 
-GameTerrain::update_input轮询或者本身提供的事件响应函数被动响应
-
-引擎运行应用程序的两种方式
-1. run(GameScene) GameScene框架
-2. 使用UI机制 UI框架
-
-getEllipsoidModel 获取地球模型
 
 引擎视频1h40min ig飞控
 
