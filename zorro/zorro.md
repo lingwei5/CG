@@ -277,6 +277,15 @@ class Light : public Node
 	float m_attenuation;
 	float m_shadow_distance;
 	float m_shadow_scale;
+	float m_diffuse_scale;
+	float m_specular_scale;
+	float m_visible_distance;
+	float m_shadow_distance;
+	float m_shadow_scale;
+	float m_render_distance;
+	float m_fade_distance;
+	float m_multiplier;
+	int shadow_size;
 }
 ```
 
@@ -286,6 +295,10 @@ LightProj
 LightOmni:泛光等，约等于点光源，但是支持阴影
 
 ### material
+主要是以下几个类
+Material
+MaterialManager
+Shader
 
 ### math
 - Geometry.h 几何相关 正交基 三角形(area normal plane) 点与三角形/多边形的位置关系、距离，碰撞检测 earclipping
@@ -360,12 +373,12 @@ LightOmni:泛光等，约等于点光源，但是支持阴影
 		void setMode(WGS_MODE m);
 		void setTransform(const dmat4& mat);
 		//如果use_transform为false，则按照椭球坐标系位于0点计算，否则按照椭球真实位置计算
-		dvec3 toWorld(const dvec3& lon_lat_alt, bool use_transform = true)const;
-		dvec3 toWorld(double lon, double lat, double alt, bool use_transform = true)const;
-		dvec3 toWGS(const dvec3& xyz, bool use_transform = true)const;
-		dvec3 getWGSNormal(double lon, double lat, dvec3* ret_pos = 0, bool use_transform = true)const;
+		dvec3 toWorld(const dvec3& lon_lat_alt, bool use_transform = true)const;//wgs坐标系下的经纬高转世界坐标系
+		dvec3 toWorld(double lon, double lat, double alt, bool use_transform = true)const;//wgs坐标系下的经纬高转世界坐标系
+		dvec3 toWGS(const dvec3& xyz, bool use_transform = true)const;//世界坐标系xyz转wgs坐标系下的经纬高
+		dvec3 getWGSNormal(double lon, double lat, dvec3* ret_pos = 0, bool use_transform = true)const;//wgs坐标系下的经纬获得海平面法线
 		void getWGSTransform(const dvec3& xyz, dmat4& ret, bool use_transform = true)const;
-		dmat4 getWGSTransform(const dvec3& xyz, bool use_transform = true)const;
+		dmat4 getWGSTransform(const dvec3& xyz, bool use_transform = true)const;//mat.getZ()==getWGSNormal
 		void getWGSTransform(double lon, double lat, const dvec3& pos, dmat4& ret, bool use_transform = true) const;
 	}
 	
@@ -374,7 +387,7 @@ LightOmni:泛光等，约等于点光源，但是支持阴影
 	世界坐标系的origin在wgs坐标系下的(0,90,-6356752):地心,z轴指向北极,xy平面为赤道平面,高度是相对于椭球面的高度所以地心是负的极半径，这个世界坐标系应该就是地心地固直角坐标系
 	可以在编辑器里测出世界坐标系的朝向:xyz与椭球面坐标系重合，z轴指向北极，xy平面为赤道平面  
 	```c++
-		dvec3 world_ori_in_wgs =	e->toWGS(dvec3(0,0,0));//世界坐标系原点(地心)的经纬高(0,90,-6356752)应该等价于(0,0.-6378137)
+		dvec3 world_ori_in_wgs =	e->toWGS(dvec3(0,0,0));//世界坐标系原点(地心)的经纬高(0,90,-6356752)应该等价于(0,0,-6378137)
 		dvec3 wgsv_xaxis_in_world =	e->toWorld(dvec3(0,0,0));//东经0°北纬0°的地球表面点(wgs坐标系的x轴,赤道平面上一点)的世界坐标系(6378137.0000000000,0,0)
 		dvec3 wgsv_yaxis_in_world =	e->toWorld(dvec3(90,0,0));//东经90°北纬0°的地球表面点(wgs坐标系的y轴,赤道平面上一点)的世界坐标系(0,6378137,0)
 		dvec3 wgsv_zaxis_in_world =	e->toWorld(dvec3(0,90,0));//东经0°北纬90°的地球北极点(wgs坐标系的z轴,北极点)的世界坐标系(0,0,6356752.3142451795)
@@ -403,7 +416,122 @@ class Node : public Instance<Node>//主要是父子关系 坐标变换
 	dmat4 m_old_world_transform;
 	dmat4 m_wgs_transform;
 	BSPNode* m_bsp_node;
+
+	static Node* GetNode(int id);
+	static Node* GetNodeByName(const jString& name);
+	static int GetNumNode();
+
+
+	string getName();
+	World* getWorld();
+
+
+	/** 主要涉及三个坐标系：本地坐标系、世界坐标系、WGS坐标系
+	 * 本地坐标系：相对于父节点的坐标系
+	 * 世界坐标系：相对于世界原点的坐标系
+	 * WGS坐标系：WGS84椭球坐标系
+	 * 
+	 * 
+	 * 1. 本地坐标系->世界坐标系：toWorld
+	 * 2. 世界坐标系->本地坐标系：toLocal
+	 * 
+	 * PRS: Position, Rotation, Scale
+	 * HPR：Heading, Pitch, Roll
+	 * 
+	 
+	 */
+	/** @brief 设置本地变换矩阵（相对于父节点）。
+	 *
+	 * @note 调用后可能触发世界变换更新与包围盒重计算。
+	 */
+	virtual void setTransform(const dmat4 &transform);
+	/** @brief 设置世界变换矩阵（直接赋予世界空间变换）。 */
+	virtual void setWorldTransform(const dmat4 &transform);
+	/** @brief 设置本地位置（相对于父节点）。 */
+	virtual void setPosition(const dvec3& v);
+	/** @brief 获取本地位置。 */
+	virtual dvec3 getPosition() const { return getTransform().getTranslate(); }
+	/** @brief 设置世界位置（直接在世界坐标系中指定位置）。 */
+	virtual void setWorldPosition(const dvec3& v);
+	/** @brief 获取世界位置。 */
+	virtual dvec3 getWorldPosition() const{ return getWorldTransform().getTranslate(); }
+	/** @brief 设置本地缩放。 */
+	virtual void setScale(const dvec3& s);
+	/** @brief 获取本地缩放。 */
+	virtual dvec3 getScale()const;
+	//
+	/** @brief 设置本地旋转（四元数）。 */
+	virtual void setRotation(const dquat& v);
+	/** @brief 获取本地旋转（四元数）。 */
+	virtual dquat getRotation()const;
+	/** @brief 设置世界旋转（四元数）。 */
+	virtual void setWorldRotation(const dquat& v);
+	/** @brief 获取世界旋转（四元数）。 */
+	virtual dquat getWorldRotation()const;
+	/** @brief 设置本地航向/俯仰/横滚（HPR）。 */
+	virtual void setHPR(const dvec3& hpr);
+	/** @brief 设置世界 HPR。 */
+	virtual void setWorldHPR(const dvec3& hpr);
+	/** @brief 获取本地 HPR。 */
+	virtual dvec3 getHPR()const;
+	/** @brief 获取世界 HPR。 */
+	virtual dvec3 getWorldHPR()const;
+	/** @brief 设置世界旋转的 XYZ 欧拉角表示。 */
+	virtual void setWorldRotationXYZ(const dvec3& v);
+	/** @brief 获取世界旋转的 XYZ 欧拉角表示。 */
+	virtual dvec3 getWorldRotationXYZ()const;
+	/** @brief 设置本地旋转的 XYZ 欧拉角表示。 */
+	virtual void setRotationXYZ(const dvec3& v);
+	/** @brief 获取本地旋转的 XYZ 欧拉角表示。 */
+	virtual dvec3 getRotationXYZ()const;
+	/** @brief 设置 WGS 坐标系中的 HPR（用于地理场景）。 */
+	virtual void setWgsHPR(const dvec3& hpr);
+	/** @brief 获取 WGS HPR（用于地理场景）。 */
+	virtual dvec3 getWgsHPR()const;
+	/** @brief 设置 WGS（经纬度/高度）位置。 */
+	virtual void setWgsPosition(const dvec3& lon_lat_alt);
+	/** @brief 获取 WGS（经纬度/高度）位置。 */
+	virtual dvec3 getWgsPosition()const;
+	/** @brief 是否支持缩放（默认为支持）。 */
+	virtual bool hasScale()const { return true; }
+
+	virtual void toLocal(vec3& pt);
+	/** @brief 将点从世界坐标系转换到节点本地坐标系（double-precision 版本）。 */
+	virtual void toLocal(dvec3& pt);
+	/** @brief 将点从本地坐标系转换到世界坐标系（single-precision 版本）。 */
+	virtual void toWorld(vec3& pt);
+	/** @brief 将点从本地坐标系转换到世界坐标系（double-precision 版本）。 */
+	virtual void toWorld(dvec3& pt);
+
+
+//脚本相关
+	virtual bool setScriptPath(const jString& path);
+	/** @brief 重新加载脚本模块（若支持）。 */
+	virtual bool relaodScript();
+	/** @brief 获取当前绑定的脚本路径字符串引用。 */
+	virtual const jString& getScriptPath()const;
+	/** @brief 获取节点绑定的脚本信息结构指针（可能为 nullptr）。 */
+	virtual ScriptInfo* getScriptInfo() { return m_script; }
+	/** @brief 获取脚本相关的数据指针（由脚本模块管理）。 */
+	virtual void* getScriptData();
+	/** @brief 释放并清理与脚本相关的绑定与资源。 */
+	virtual void releaseScript();
+
+
+	addChild();
+	removeChild();
+
+	getChildById();
+	getChildByName();
+	getChildByTag();
+
 }
+```
+
+```c++
+//提供多种触发器形状（盒、球、柱、锥）用于检测节点与触发区域的交互。
+class WorldTrigger: public Node
+
 ```
 
 ### object
@@ -528,9 +656,9 @@ BodyRigid
 	```
 6. RLights
 7. RClouds
-8. RPost
+8. RPost 后处理模块
 9. RScene
-10. RState
+10. RState 渲染管线的状态设置、资源绑定与输出目标管理的抽象方法,应该对应OpenGL或者DX的管线
 11. Visualizer
 
 
@@ -1699,6 +1827,8 @@ TEXTURE返回的值是float4
 11. 地形不能使用模型那种uv输入给ir的形式，因为地形的uv是变化的?需要直接使用输出的xyzw颜色值给到ircolor，所以需要用ir的功能替换math.lerp
 12. 四通道result.dds 4096可以读入，需要修改ir.h的y通道
 
+
+
 ## 使用
 添加地球节点时，必须有earth文件夹及下面的文件
 
@@ -1718,6 +1848,18 @@ project项目作为demo不断添加新的演示功能 AppWindow.cpp本身就乱�
 新建地形时的全局索引是哪个，貌似需要一直是哪个，注掉就不显示地形了? 应该是得注意
 
 浮点纹理得拆成单通道的然后四个一组四个一组添加到mask32f，对应材质编辑器里的mask32f_0 mask32f_1 mask32f_2 mask32f_3,文件路径mask下的0 1 2 ...
+
+block中变量有时提示未定义的标识符，变量名后边加上个数字就好了.....
+
+sdk或者编辑器运行时提示无法隐式转换，如果确认代码没问题，可能是修改了block后，材质编辑器里的连线断了，需要重新连线
+
+no matching 0 parameter function ，可能是材质编辑器里材质节点没连上，重新连上就好了
+
+节点属性中的Tranform下选中地学，R清空，P貌似就是经纬高
+
+constant.int貌似传不进去 用float代替
+
+Engine Render World Node Light Camera Mesh Material sdk中常用的几个类
 
 ## Texture获取及更新
 1. Object ObjectPrefab获取Texture
@@ -1867,6 +2009,97 @@ tex->getImage(&img);
 jImage img;
 img.load("data/sanya_test/textures/result.dds");
 ```
+
+``` c++
+GET_RENDERMNGR->createTexture(&img, 0, LINE_INFO);
+Render* r = GET_RENDER;
+	RExec* rr = r->getRenderer();
+	TEXTURE_FORMAT target_fmt = TEXTURE_FORMAT_RGBA32_FLOAT;
+	//TEXTURE_FORMAT target_fmt = TEXTURE_FORMAT_RGBA8_UNORM;
+	TEXTURE_FORMAT fmt = rr->getFinalColorTextureFormat();
+	if (target_fmt == TEXTURE_FORMAT_RGBA32_FLOAT)
+	{
+		rr->setFinalColorTextureFormat(TEXTURE_FORMAT_RGBA32_FLOAT);
+	}
+	TextureRender* rt = r->getTextureRender2D(w, h, 0, Render::TEXTURE_GROUP_GENERAL, LINE_INFO);
+	JCHECK_RET_0_ASSERT(rt);
+	Texture* ret = 0;
+	{
+		RState* state = r->getState();
+		//TEXTURE_FORMAT_RGBA8_UNORM  TEXTURE_FORMAT_RGBA32_FLOAT
+		ret = GET_RENDERMNGR->createTexture2D(w, h, target_fmt, TEXTURE_FLAG::FILTER_LINEAR | TEXTURE_FLAG::ANISOTROPY_16 | r->getTextureRenderFlags(), LINE_INFO);
+		rt->setColorTexture(0, ret);
+		rt->enable();
+		rt->clearBuffer(BUFFER_ALL, vec4(0,0,0,1));
+		r->renderViewport(world, projection, modelview, caller, true);
+		rt->resolve();
+
+		rt->disable();
+	}
+```
+
+
+
+
+## 添加shader及对应的材质
+1. 添加shader文件 在data/core/shaders目录下,选择或新建对应的文件夹(如post)，在子目录下新建一个文件夹(如IRMTF)，添加vs.c ps.c的shader文件
+2. 在data/core/mtl目录下，找到对应的.mtl文件,post.mtl,
+3. 在.mtl文件中添加shader相关接口
+   ```
+   material
+	{
+		name = "post_IR_NUC";
+		
+		shader
+		{ 
+			pass = "post";
+			states = "gray";
+			textures = "color0,color1";
+			buffer_mask = "BUFFER_COLOR";
+			depth_func = "DEPTH_NONE";
+			blend_func = "none,none";
+			vertex = "data/core/shaders/post/IRNUC/vs.c";
+			fragment = "data/core/shaders/post/IRNUC/ps.c";
+		}
+		texture
+		{
+			name = "color0";
+			pass = "post";
+			type = "procedural";
+			unit = 0;
+		}
+		texture
+		{
+			name = "color1";
+			pass = "post";
+			type = "procedural";
+			unit = 1;
+		}
+	}
+   ```
+4. .mtl文件可以新建，以保证不会在更新引擎时被冲掉，放在一些默认mtl纹理引擎会自动加载，放到单独的mtl里需要手动加载释放
+5. 自建.mtl文件的管理
+   1. GET_MATMNGR->load("data/core/mtl/xx.mtl");//加载.mtl文件
+   2. Material* mat = GET_MATMNGR->get("post_IR_NUC",this,LINE_INFO);//获取材质
+   3. GET_MATMNGR->free(mat,this);//释放材质
+6. 
+
+
+# Texture Shader Material Manager Engine总结
+1. jImage是Texture的基本数据
+2. Texture是纹理的基本对象，本身没有引用计数，其他的方式最终估计都是通过这个来处理，管理纹理格式 图像格式，创建各种格式的纹理及load
+3. TextureObject封装Texture路径或图像，以支持延迟/异步加载、引用获取与释放
+4. RenderTarget用于离屏渲染，管理ColorTexture DepthTexture
+5. TextureRender用于渲染到纹理,是个抽象基类，用于渲染到2d/3d/cube/array等纹理，管理RenderTarget对象
+6. TextureManager是可能所有Texture的引用计数的管理者，可以通过get load grab获得引用，需要调用者free释放引用，引用计数为0时自动回收Texture资源
+7. MaterialManager应该是通过名字管理所有的Material，包括后处理的
+8. Material是材质，本身有引用计数，封装了渲染所需的Shader、Texture、参数与选项，用于在渲染期间配置渲染状态，包含Shader和Texture，Shader是渲染的算法，Texture是渲染的贴图
+9. Material可以通过Object的getSurfaceMaterial获取，或者MaterialManager通过名字获取，然后通过Material的getMaterailTextureByTag获取MaterialTexture，进而获取Texture
+10. Shader是渲染管线中着色器集合的抽象
+11. RenderManager是渲染管理器，可以createViewport createRender createShader createRenderTarget createSampler createTexture createTextureRenderXX createMesh createParticles createUI
+12. Render抽象基类，场景渲染、纹理与各种渲染资源、渲染开关/参数的管理，Rexec是渲染执行器，RState是渲染状态，RPost是后处理
+13. Engine 引擎核心类，管理整个三维引擎的生命周期和主要组件，包含各种Manager,包括RenderManager PackageManager ScriptManager MaterialManager TextureManager ImageManager MeshManager SoundManager等
+
 
 # TODO
 1. ~~node world等场景组织 然后是场景数据~~
