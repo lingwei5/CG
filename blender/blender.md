@@ -343,10 +343,29 @@ OpenColorIO用于管理颜色，包括颜色空间转换，颜色校正等
 .blend文件包含一个database，这个database包含所有的scenes，objects，meshes，textures等等
 一个.blend文件可以包含多个scenes，每个scene可以包含多个objects，每个object可以包含多个materials，每个material可以包含多个textures
 
-blend项目的基础单位是data-block,data-block可以是meshes, objects, materials, textures, node trees, scenes, texts, brushes, and even Workspaces.
-~~# Add-ons~~
-~~# Advanced~~
-~~# Troubleshooting~~
+## Data-Blocks
+主要是在outline编辑器里使用
+blend项目的基础单位是data-block,data-block可以是meshes, objects, materials, textures, node trees, scenes, texts, brushes, and even Workspaces.  
+data-block是各种不同数据的通用抽象:  
+1. 是.blender文件的主要内容
+2. 可以相互引用，用于复用、实例化
+3. 指定类型的数据，名字唯一
+4. 可以增删改查
+5. 不同文件之间可以链接
+6. 可以有自己的动画数据
+7. 可以有自定义属性
+
+
+![alt text](<data-blocks types and icon.png>)
+
+删除data-block: 
+unlink:当前数据不再被某个用户使用，引用计数-1  
+材质右侧的x进行unlink
+shift+LMB+x:所有用户都不在使用此data-block,引用计数置零，删除data-block
+
+~~# Add-ons~~  
+~~# Advanced~~  
+~~# Troubleshooting~~  
 # Glossary
 https://docs.blender.org/manual/en/latest/glossary/index.html# blender及图形学术语
 
