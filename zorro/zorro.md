@@ -145,13 +145,46 @@ public:
 ### gui
 猜测是编辑器界面相关的类
 ```c++
-
+/**
+ * @brief 窗口部件基类
+ * 
+ * 提供基础窗口功能的抽象类，封装了窗口创建、事件处理、状态管理等核心功能。
+ * 继承自IApp接口，实现了跨平台的窗口管理机制。
+ * 
+ * @note 此类管理窗口的生命周期、位置、大小、样式等属性
+ * @note 支持模态和非模态窗口模式
+ * @note 窗口销毁时会自动调用release()清理资源
+ */
 class Widget : public IApp//引擎的窗口
 {
 
 }
 
+/**
+ * @brief 渲染窗口基类
+ * 
+ * 提供3D渲染功能的窗口类，支持Direct3D 11渲染管线、UI系统集成、帧率统计和调试日志显示。
+ * 继承自Widget，扩展了渲染上下文管理、垂直同步、性能分析等功能。
+ * 
+ * @note 此类管理渲染视口和D3D11设备上下文，在析构时自动清理渲染资源
+ * @note 支持通过ClearColor属性设置背景清除颜色
+ * @note 渲染流程：update() -> render() -> swap()
+ */
 class RenderWidget : public Widget//编辑器很可能就是派生自这个类
+{
+
+}
+
+/**
+ * @brief IG引擎主窗口类
+ * 
+ * 提供引擎应用程序的主渲染窗口，支持3D场景渲染、输入事件处理和Direct3D 11集成。
+ * 继承自RenderWidget，用于管理游戏场景的显示和交互。
+ * 
+ * @note 通常与IGApplication配合使用，在应用程序初始化后创建
+ * @note 支持Direct3D 11渲染管线，可通过getD3D11Device等方法访问D3D11资源
+ */
+class IGMainWindow : public RenderWidget
 {
 
 }
@@ -172,7 +205,11 @@ RenderWidget派生出以下类:这些好像是编辑器打开文件 弹出消息
 应该是引擎对外的接口
 
 ```c++
-class IApp
+/**
+ * @brief 应用程序接口类
+ * @note 管理应用窗口、生命周期、事件处理等。所有权归调用者，线程安全性需由外部保证。
+ */
+class IApp 
 {
 	virtual Splash* getSplash()const = 0;
 	virtual UIRoot* getUIRoot()const = 0;
@@ -813,7 +850,7 @@ Track应该是动画的容器?
 
 ### ui
 ```c++
-class UIRoot//UI的管理器
+class UIRoot//感觉是UI资源的生命周期等的管理及响应派发?
 {
 	m_widget:IApp*;
 	jSet<UIElement*> m_widgets;//子控件
@@ -827,6 +864,9 @@ class UIRoot//UI的管理器
 	UIElement* getChildByTag(int tag) const;
 	int getMinWidth()const;
 	int getMinHeight()const;
+
+	void onMouseXX();
+	void onKeyXX();
 }
 ```
 
@@ -835,6 +875,8 @@ class UIElement
 {
 	UIRoot* m_root;
 	UIElement* m_parent;
+
+	virtual bool addWrap(UIWrap* p, UI_EXPAND_TYPE expand = UI_EXPAND_NONE) { JCHECK_RET_0_ASSERT(0); }
 
 	void render_triangle();
 	void render_quad();
@@ -889,6 +931,88 @@ protected:
 	jString m_ui_dir;
 }
 ```
+
+```c++
+/** @file
+ * @brief UISpriteLayer 类及其公开接口声明。
+ * 用于管理由多图层组成的 UI 精灵，每层可独立设置贴图、颜色与变换。
+ * 注释面向第三方开发者，说明使用方式、所有权与生命周期约定。
+ */
+class UISpriteLayer : public UIElement
+{
+	 /**
+	  * @brief 设置用于渲染的纹理对象。
+	  * @param texture 纹理指针。
+	  * @param flipped 是否翻转纹理。
+	  * @note 请确认纹理的所有权约定（是否由本对象释放）。
+	  */
+	void setRender(Texture* texture, bool flipped = 0);
+	
+};
+
+/** @file
+ * @brief UISpriteViewport 类声明。
+ * 提供在 UI 中嵌入渲染视口的能力，可将场景渲染到纹理并在 UI 中显示。
+ */
+class UISpriteViewport: public UISpriteLayer
+{
+	J_PROPERTY(int, m_viewport_mask, ViewportMask);
+	J_PROPERTY(int, m_reflection_mask, ReflectionMask);
+	J_PROPERTY_BOOL(m_auto_adjust_viewport_size, AutoAdjustViewportSize);
+	//??????GameScene?????????????
+	J_PROPERTY_BOOL(m_run_game, RunGame);
+	Camera* m_cam;
+	int m_texture_width;		// texture width
+	int m_texture_height;		// texture height
+
+	float m_viewport_ifps;	// viewport ifps
+	float m_viewport_time;	// viewport time
+
+	Texture* m_texture;
+	TextureRender* m_texture_render;
+	J_PROPERTY_REF(jString, m_post_materials, PostMaterials);
+	J_PROPERTY(IG_VISION_MODE, m_vision_mode, VisionMode);
+	J_PROPERTY_BOOL(m_enable_world_update, EnableWorldUpdate);
+	J_PROPERTY_BOOL(m_first_frame, FirstFrame);
+	J_PROPERTY(World*, m_world, World);
+	J_PROPERTY_REF(vec4, m_clear_color, ClearColor);
+	J_PROPERTY_REF(dmat4, m_old_projection, OldProjection);
+	J_PROPERTY_REF(dmat4, m_old_modelview, OldModelview);
+};
+```
+
+```c++
+/**
+ * @brief UI 属性包装器基类，用于将数据与具体 UI 控件绑定。
+ *
+ * 派生类应实现 `update` 来同步 UI 与数据，`release` 用于清理绑定关系。
+ * 所有方法应在主线程调用。
+ */
+class UIWrap;
+
+
+/**
+ * @brief 模板数据操作包装器，将对象字段与 UI 控件绑定。
+ * @tparam TYPE 属性类型。
+ * @note 构造时需要提供绑定用的 setter/getter 成员函数。
+ */
+template <typename TYPE>
+class DataOper : public UIWrap
+{
+public:
+	template<typename R, typename T>
+	DataOper(T* t, R(T::* s)(TYPE), TYPE(T::* g)()const)
+	{
+		m_set.bind(Bind(s, t, __1));
+		m_get.bind(Bind(g, t, __1));
+	}
+
+};
+
+继续派生了UIBool UIInt UIIntSlider UIFloat UIFloatSlider UIDoubleSlider UIString UIFile UIgVecx UIEnum UIMask
+
+```
+
 
 ### world
 
@@ -2100,6 +2224,12 @@ Render* r = GET_RENDER;
 12. Render抽象基类，场景渲染、纹理与各种渲染资源、渲染开关/参数的管理，Rexec是渲染执行器，RState是渲染状态，RPost是后处理
 13. Engine 引擎核心类，管理整个三维引擎的生命周期和主要组件，包含各种Manager,包括RenderManager PackageManager ScriptManager MaterialManager TextureManager ImageManager MeshManager SoundManager等
 
+# UI相关总结
+1. IApp含有Splash UIRoot ControlApp，派生关系:IApp-->Widget-->RenderWidget-->IGMainWindow
+2. UIRoot管理UIElement生命周期等
+3. UIElement是UI基类， 派生了UIVlayout UIGroupBox UITabBox等容器，
+4. 渲染场景到纹理并嵌入UI的派生关系:UIElement-->UISpriteLayer-->UISpriteViewport-->NodeSnapShotView
+5. UI与对象属性的绑定UIWrap, UIElement->addWrap
 
 # TODO
 1. ~~node world等场景组织 然后是场景数据~~
