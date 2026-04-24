@@ -1746,7 +1746,9 @@ ObjectTerrain vs TerrainNode:
 2. earth文件夹怎么来的 data文件夹下的地球数据库，eartch.cfg实际是一个数据库索引文件,通过一条条记录指向某个目录下的terrain.cfg，而terrain.cfg是个Package，记录了具体的dem dom lightmap数据,这些只负责索引,具体的文件夹要手动创建并添加terrain.cfg文件
 3. editor.cfg定义了地形lod尺寸
 4. 菜单栏新建功能，会创建一个默认的世界场景，包含地球 月球 太阳，其中地球是ObjectTerrain类型，通过earth.cfg指定数据路径，里面再通过terrain.cfg指定具体的dem dom lightmap数据
-5. .mtl 跟.mat啥区别? .mtl是材质与shader的关联?
+5. .mtl 跟.mat啥区别? .mtl是材质与shader的关联? .mtl似乎可以直接指定shader文件，比如红外的后处理shader; .mat定义了
+   1. .mtl可以直接定义一系列Material对象,每个Material对象可以指定Shader对象,Shader又可以指定一些属性
+   2. .mat定义了蓝图节点吧，也可以像.mtl一样定义一系列Material对象,这个可能是在材质编辑器里编辑用的
 6. .mat材质文件是材质文件,有两种一种是模板(父材质) 一种是实例(实例在编辑器里的图标加了锁链,意思是锁定无法修改了,标题栏也会显示INTANCE) .world文件中会在surface里指定对应的.mat文件
    1. 实例材质的.mat文件主要包含父材质的目录及其他属性
 		```c++
@@ -1827,7 +1829,11 @@ ObjectTerrain vs TerrainNode:
 	```c++
 	block
 	{
-		type = "Math.ir";//用于在.mat的blueprint.node中标识节点类型,从而执行这种类型对应的shader代码
+		type = "PS.Input.Grass";//用于在.mat的blueprint.node中标识节点类型,从而执行这种类型对应的shader代码
+		usage = "ps_start";
+		vertex = "data/core/materials/generate/grass/vs.c";
+
+		bind = "ObjectGrass";
 		input_path//定义输入参数
 		{
 			text = "AtmScale";//用于在.mat的blueprint.joint中标识起始节点连接点名称 anchor_0 anchor_1
@@ -1841,6 +1847,19 @@ ObjectTerrain vs TerrainNode:
 			type = "float4";
 			name = "output_value";
 			function = "ir(@_atmScale,@_atmOffset,@_atmClamp,@_SensorSelect,@_SensorScaleOffset,@_convert888Enable,@_Specular1,@_Specular2,@_Shininess1,@_Shininess2,@_Emission1,@_Emission2,@vert,@_uv,@N,@T,@B,@n,@_albedo,@_Emat1Tex,@_Emat1_s,@_Emat2Tex,@_Emat2_s,@_Emat3Tex,@_Emat3_s,@_IrradianceTex,@_Irradiance_s,@_FogTex,@_Fog_s);";//执行函数,其中@_atmScale等是input_path中定义的变量名,ir是函数名, ir函数定义在shader文件中 如何与ir.h关联的不知道
+		}
+
+		include//可以添加需要包含的头文件
+		{
+			i = "#include <data/core/shaders/common/ps_base.h>";
+			i = "#include <data/core/shaders/common/ps_kit.h>";
+			i = "#include <data/core/shaders/common/ir.h>";
+		}
+		function//这个应该类似添加.cpp
+		{
+			i = "#include <data/core/materials/generate/grass/ps_in_1.h>";
+			i = "MAIN_BEGIN_FRAGMENT(PS_OUT)";
+			i = "#include <data/core/materials/generate/grass/ps_in_2.h>";
 		}
 
 		variable
@@ -1860,6 +1879,70 @@ ObjectTerrain vs TerrainNode:
 		}
 	}
 	```
+	根据提供的.cfg文件内容，以下是`block`节点中所有字段的总结：
+
+    1. 基础字段
+         - `type`: 块的类型标识符
+         - `data_type`: 数据类型（如float, int等）
+         - `constant`: 是否为常量（1或0）
+         - `texture2D`: 是否为2D纹理（1或0）
+         - `texture3D`: 是否为3D纹理（1或0）
+         - `textureCube`: 是否为立方体纹理（1或0）
+         - `num_limit`: 数量限制
+         - `usage`: 使用场景（如vs_start, vs_end, ps_start, ps_end等）
+         - `vertex`: 顶点着色器路径
+         - `control`: 控制着色器路径
+         - `evaluate`: 评估着色器路径
+         - `geometry`: 几何着色器路径
+         - `mat`: 材质文件路径
+         - `bind`: 绑定的对象类型
+    2. 输入输出路径字段
+         - `input_path`: 输入路径定义，包含：
+           - `text`: 显示文本
+           - `type`: 数据类型
+           - `name`: 变量名
+           - `default`: 默认值
+           - `edit`: 是否可编辑（1或0）
+
+         - `output_path`: 输出路径定义，包含：
+           - `text`: 显示文本
+           - `type`: 数据类型
+           - `name`: 变量名
+           - `function`: 功能函数
+           - `function_editor`: 编辑器中的功能函数
+    3. 变量定义字段
+         - `variable`: 变量定义，包含：
+           - `text`: 显示文本
+           - `type`: 数据类型
+           - `name`: 变量名
+           - `edit`: 是否可编辑（1或0）
+           - `default`: 默认值
+           - `sub`: 子变量定义
+    4. 包含和函数字段
+         - `include`: 包含的头文件，包含：
+           - `i`: 包含的文件路径
+
+         - `function`: 函数定义，包含：
+           - `i`: 函数代码
+
+         - `function_begin`: 函数开始标记
+         - `function_end`: 函数结束标记
+
+    5. 主函数字段
+         - `main_begin`: 主函数开始标记
+         - `main_end`: 主函数结束标记
+
+    6. 其他字段
+         - `version`: 版本号
+         - `vertex`: 顶点着色器路径
+         - `control`: 控制着色器路径
+         - `evaluate`: 评估着色器路径
+         - `geometry`: 几何着色器路径
+         - `mat`: 材质文件路径
+         - `bind`: 绑定的对象类型
+
+	这些字段共同定义了block节点的结构、输入输出、变量、函数和着色器路径等信息。不同类型的block可能只包含其中部分字段。
+
    145版本中201个shader数据结构，其中
    Global.12个
    VS 10个
@@ -1875,6 +1958,9 @@ ObjectTerrain vs TerrainNode:
 
 
 # 使用&开发
+
+使用时需要注意备份data及project项目
+
 使用的demo主要是AppQt AppSnapshot
 
 ![引擎LOD数字越大细节越多,金字塔塔尖是0级](引擎LOD数字越大细节越多.png)
@@ -1885,6 +1971,8 @@ exe的上级目录下有data文件夹即可
 GET_RENDER->setVisionMode(IG_VISION_IR);//修改渲染模式
 
 getEllipsoidModel 获取地球模型
+
+World::LoadNodeSingle: node type "ObjectGrass" not support 需要调用Objectxxx::Reg();
 
 ## 引擎执行流程
 1h07m开始讲述引擎执行流程  
@@ -1974,16 +2062,25 @@ project项目作为demo不断添加新的演示功能 AppWindow.cpp本身就乱�
 浮点纹理得拆成单通道的然后四个一组四个一组添加到mask32f，对应材质编辑器里的mask32f_0 mask32f_1 mask32f_2 mask32f_3,文件路径mask下的0 1 2 ...
 
 block中变量有时提示未定义的标识符，变量名后边加上个数字就好了.....
+block中函数提示error X3004: undeclared identifier 'MeshIR',
+1. 第一步,在block.cfg的输入节点中添加include
+		{
+			i = "#include <data/core/shaders/common/ps_base.h>";
+			i = "#include <data/core/shaders/common/ps_kit.h>";
+			i = "#include <data/core/shaders/common/ir.h>";
+		}
+2. 在材质编辑器里重新保存一下材质,会自动编译材质，此时再打开就可以了
 
 sdk或者编辑器运行时提示无法隐式转换，如果确认代码没问题，可能是修改了block后，材质编辑器里的连线断了，需要重新连线
 
 no matching 0 parameter function ，可能是材质编辑器里材质节点没连上，重新连上就好了
 
-节点属性中的Tranform下选中地学，R清空，P貌似就是经纬高
-
 constant.int貌似传不进去 用float代替
 
 Engine Render World Node Light Camera Mesh Material sdk中常用的几个类
+
+节点属性中的Tranform下选中地学，R清空，P貌似就是经纬高
+添加一个目标到地面时，如果想要目标对齐某个位置，则选中目标，选择地学坐标，清空R，然后P设置经纬高，清空R时，鼠标选中xyz滚动滚轮可实现旋转
 
 ## Texture获取及更新
 1. Object ObjectPrefab获取Texture
