@@ -2073,6 +2073,8 @@ block中函数提示error X3004: undeclared identifier 'MeshIR',
 
 sdk或者编辑器运行时提示无法隐式转换，如果确认代码没问题，可能是修改了block后，材质编辑器里的连线断了，需要重新连线
 
+修改block后，需要保存材质重编译，所有的涉及的.mat文件都需要 备份的.mat文件改一下扩展名
+
 no matching 0 parameter function ，可能是材质编辑器里材质节点没连上，重新连上就好了
 
 constant.int貌似传不进去 用float代替
@@ -2081,6 +2083,14 @@ Engine Render World Node Light Camera Mesh Material sdk中常用的几个类
 
 节点属性中的Tranform下选中地学，R清空，P貌似就是经纬高
 添加一个目标到地面时，如果想要目标对齐某个位置，则选中目标，选择地学坐标，清空R，然后P设置经纬高，清空R时，鼠标选中xyz滚动滚轮可实现旋转
+
+地形的.mat的mask32f0 mask32f_parent0的纹理都使用transparent.dds，保证rgba 4通道都是0.0
+
+树木的纹理dds跟png有错位 红外跟可见光需要对齐
+
+精细地形的多张mask要同步更新，保持一个精度，否则会错乱
+
+编辑器中量化比例是1.0(因为地形实际没量化或者说是已量化完的)，sdk中为了弥补二次量化导致的变暗，所以这里乘以8.0
 
 ## Texture获取及更新
 1. Object ObjectPrefab获取Texture
@@ -2320,6 +2330,14 @@ Render* r = GET_RENDER;
 11. RenderManager是渲染管理器，可以createViewport createRender createShader createRenderTarget createSampler createTexture createTextureRenderXX createMesh createParticles createUI
 12. Render抽象基类，场景渲染、纹理与各种渲染资源、渲染开关/参数的管理，Rexec是渲染执行器，RState是渲染状态，RPost是后处理
 13. Engine 引擎核心类，管理整个三维引擎的生命周期和主要组件，包含各种Manager,包括RenderManager PackageManager ScriptManager MaterialManager TextureManager ImageManager MeshManager SoundManager等
+14. 磁盘文件读取 
+    1.  image.load全是自己管理， 
+    2.  texmngr get的引用计数，需要free， 
+    3.  rendermngr create不缓存自己destroy  ，
+    4.  get_render->gettexture 一般后处理作为RTT，release放回贴图池 渲染辅助， 
+    5.  如果给了材质都是用texmngr
+    6.  matmngr-> 从文件load, get、 然后free
+15. 
 
 # UI相关总结
 1. IApp含有Splash UIRoot ControlApp，派生关系:IApp-->Widget-->RenderWidget-->IGMainWindow
