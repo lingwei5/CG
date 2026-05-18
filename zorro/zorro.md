@@ -32,8 +32,8 @@ ui资源
 ### materials
 各种材质
 default默认的
-generate自动生成的应该是对外的接口 里面的block.cfg需要修改
-mtl不知道干啥
+generate自动生成的应该是对外的接口 里面的block.cfg需要修改 是需要在编辑器里保存后重新自动编译的材质
+mtl~~不知道干啥~~是给程序员用的材质
 ### mesh
 ### osm
 ### prefab
@@ -1745,7 +1745,7 @@ ObjectTerrain vs TerrainNode:
 		```
 2. earth文件夹怎么来的 data文件夹下的地球数据库，eartch.cfg实际是一个数据库索引文件,通过一条条记录指向某个目录下的terrain.cfg，而terrain.cfg是个Package，记录了具体的dem dom lightmap数据,这些只负责索引,具体的文件夹要手动创建并添加terrain.cfg文件
 3. editor.cfg定义了地形lod尺寸
-4. 菜单栏新建功能，会创建一个默认的世界场景，包含地球 月球 太阳，其中地球是ObjectTerrain类型，通过earth.cfg指定数据路径，里面再通过terrain.cfg指定具体的dem dom lightmap数据
+4. 菜单栏-->文件-->新建功能，会创建一个默认的世界场景，包含地球 月球 太阳，其中地球是ObjectTerrain类型，通过earth.cfg指定数据路径，里面再通过terrain.cfg指定具体的dem dom lightmap数据
 5. .mtl 跟.mat啥区别? .mtl是材质与shader的关联? .mtl似乎可以直接指定shader文件，比如红外的后处理shader; .mat定义了
    1. .mtl可以直接定义一系列Material对象,每个Material对象可以指定Shader对象,Shader又可以指定一些属性
    2. .mat定义了蓝图节点吧，也可以像.mtl一样定义一系列Material对象,这个可能是在材质编辑器里编辑用的
@@ -2092,6 +2092,8 @@ Engine Render World Node Light Camera Mesh Material sdk中常用的几个类
 
 编辑器中量化比例是1.0(因为地形实际没量化或者说是已量化完的)，sdk中为了弥补二次量化导致的变暗，所以这里乘以8.0
 
+有树木的时候，开启后处理，会变黑，关掉树木 重启编辑器 则可以开启后处理，如果是变得特别亮则是关闭hdr和后处理 估计是bug
+
 ## Texture获取及更新
 1. Object ObjectPrefab获取Texture
 	```c++
@@ -2393,3 +2395,62 @@ Texture
 - [] ocean
 - [] partical
 
+
+# **红外场景搭建注意事项**
+程序在D:\workspace\EarthMaker 
+测试数据及场景在D:\workspace\EarthMaker\data\
+红外独立资源及路径在D:\workspace\EarthMaker\data\InfraRed
+1. 建一个场景
+2. 导入地形数据 基础地形+精细地形+精细地形的再细化
+3. 导入地形红外材质时，把四通道分别保存，类似树木mask导入的方式，依次导入四个通道
+4. ocean根据需要关闭，不关闭有时会在精细地形周围形成海面
+5. cloud关掉
+6. 数据都放到data下的InfraRed路径下，方便部署
+7. 地形导入时，要从低分辨率到高分辨率依次导入，后导入的会覆盖之前导入的，每次导入后需确认导入后的效果跟卫片基本一致，如果明显比卫片要糊，需要调整
+   1. ![alt text](地形卫片精度调整界面.png)  似乎主要是lod12起作用了(或者保证至少两个lod都能达到预期精度?)，调整lod12的瓦片尺寸以改变精度，如果精度太低，会糊，如果精度太高，会卡顿
+   2. 调整完成后重新导入所需精度的dom，查看结果，如果还糊，继续升级，如果满足精度则就可以了
+8. .mat换到InfraRed下
+9. texture也换到下面
+10. 可见光模型添加tag:visible,红外模型添加tag:IR
+11. 导入预制体时，放到指定目录D:\workspace\EarthMaker\data\InfraRed\prefabs
+12. 改动添加预制体对应的材质及纹理，
+13. 材质父类主要在D:\workspace\EarthMaker\data\InfraRed\materials，根据类型选择mesh terrain或者grass的实例子材质
+14. 编辑器中量化的范围统一为与sdk相同的初始范围[0,10] 保持效果一致
+15. f16可见光材质自己生成的，没使用红外材质
+16. 红外模型需要尽量朝外
+
+
+数据路径:
+1. 精细地形:D:\workspace\data\5kmjichangshuju 及子文件夹
+2. 可见光:"D:\workspace\data\build0804\build0804-TRIANGLE.obj" D:\workspace\data\F16_0430
+3. 红外 D:\workspace\data\temperature-mapping\buildings0428 D:\workspace\data\temperature-mapping\f16_H0km_0Ma "D:\workspace\data\temperature-mapping\j20\j20.obj"
+4. D:\workspace\data\temperature-mapping\f16_H10是飞机模型，尺寸小
+
+
+
+
+# **红外场景搭建**
+注意事项:
+1. 建一个场景
+2. 导入地形数据 基础地形+精细地形+精细地形的再细化
+3. 导入地形红外材质时，把四通道分别保存，类似树木mask导入的方式，依次导入四个通道
+4. ocean根据需要关闭，不关闭有时会在精细地形周围形成海面
+5. cloud关掉
+6. 地形导入时，要从低分辨率到高分辨率依次导入，后导入的会覆盖之前导入的，每次导入后需确认导入后的效果跟卫片基本一致，如果明显比卫片要糊，需要调整
+7. 可见光模型添加tag:visible,红外模型添加tag:IR
+8. 导入预制体时，放到指定目录D:\workspace\EarthMaker\data\InfraRed\prefabs
+9. 改动添加预制体对应的材质及纹理，目前mesh基本使用default.mat
+10. 材质父类主要在D:\workspace\EarthMaker\data\InfraRed\materials，根据类型选择mesh terrain或者grass的实例子材质
+11. f16可见光材质自己生成的，没使用红外材质
+12. 树木用2,避免榕树枝条的黑边
+
+
+数据路径:
+1. 程序在D:\workspace\EarthMaker 
+2. 测试资源及场景在D:\workspace\EarthMaker\data\
+3. 红外独立资源路径在D:\workspace\EarthMaker\data\InfraRed
+4. 精细地形:D:\workspace\data\5kmjichangshuju 及子文件夹
+5. 可见光:"D:\workspace\data\build0804\build0804-TRIANGLE.obj" D:\workspace\data\F16_0430
+6. 红外 D:\workspace\data\temperature-mapping\buildings0428 D:\workspace\data\temperature-mapping\f16_H0km_0Ma "D:\workspace\data\temperature-mapping\j20\j20.obj"
+7. D:\workspace\data\temperature-mapping\f16_H10是飞机模型，尺寸小
+8. 
