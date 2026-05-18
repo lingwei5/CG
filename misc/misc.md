@@ -2,6 +2,10 @@
 
 # 图形相关的各种库
 
+1. xatlas库的.cpp里有很多宝藏代码 研究一下
+2. [FastBVH](https://github.com/brandonpelfrey/Fast-BVH) 
+3. [PBR-Viewer](https://github.com/comfyui-wiki/PBR-Viewer)
+
 ## 几何处理库
 ### igl
 https://github.com/libigl/libigl 几何处理库 网格处理 参数化(纹理映射 uv展开) https://www.alecjacobson.com/weblog/4500.html 是一个uv编辑器
@@ -161,6 +165,484 @@ ImageButton:图像列表
 
 ### ImageViewer
 https://github.com/kopaka1822/ImageViewer.git 可以看hdr dds png等,可以参照实现一个查看器
+
+### gli
+1. texture:通过storage_linear实现线性存储,不同layer(数组纹理)、不同face(立方体贴图)、不同level的纹理数据是连续存储的
+2. sampler模拟了gpu的纹理采样功能
+
+```c++
+class texture
+	{
+	public:
+		typedef size_t size_type;
+		typedef gli::target target_type;
+		typedef gli::format format_type;
+		typedef gli::swizzles swizzles_type;
+		typedef storage_linear storage_type;
+		typedef storage_type::data_type data_type;
+		typedef storage_type::extent_type extent_type;
+
+		/// Create an empty texture instance
+		texture();
+
+		/// Create a texture object and allocate a texture storage for it
+		/// @param Target Type/Shape of the texture storage_linear
+		/// @param Format Texel format
+		/// @param Extent Size of the texture: width, height and depth.
+		/// @param Layers Number of one-dimensional or two-dimensional images of identical size and format
+		/// @param Faces 6 for cube map textures otherwise 1.
+		/// @param Levels Number of images in the texture mipmap chain.
+		/// @param Swizzles A mechanism to swizzle the components of a texture before they are applied according to the texture environment.
+		texture(
+			target_type Target,
+			format_type Format,
+			extent_type const& Extent,
+			size_type Layers,
+			size_type Faces,
+			size_type Levels,
+			swizzles_type const& Swizzles = swizzles_type(SWIZZLE_RED, SWIZZLE_GREEN, SWIZZLE_BLUE, SWIZZLE_ALPHA));
+
+		/// Create a texture object by sharing an existing texture storage_type from another texture instance.
+		/// This texture object is effectively a texture view where the layer, the face and the level allows identifying
+		/// a specific subset of the texture storage_linear source. 
+		/// This texture object is effectively a texture view where the target and format can be reinterpreted
+		/// with a different compatible texture target and texture format.
+		texture(
+			texture const& Texture,
+			target_type Target,
+			format_type Format,
+			size_type BaseLayer, size_type MaxLayer,
+			size_type BaseFace, size_type MaxFace,
+			size_type BaseLevel, size_type MaxLevel,
+			swizzles_type const& Swizzles = swizzles_type(SWIZZLE_RED, SWIZZLE_GREEN, SWIZZLE_BLUE, SWIZZLE_ALPHA));
+
+		/// Create a texture object by sharing an existing texture storage_type from another texture instance.
+		/// This texture object is effectively a texture view where the target and format can be reinterpreted
+		/// with a different compatible texture target and texture format.
+		texture(
+			texture const& Texture,
+			target_type Target,
+			format_type Format,
+			swizzles_type const& Swizzles = swizzles_type(SWIZZLE_RED, SWIZZLE_GREEN, SWIZZLE_BLUE, SWIZZLE_ALPHA));
+
+		virtual ~texture(){}
+
+		/// Return whether the texture instance is empty, no storage_type or description have been assigned to the instance.
+		bool empty() const;
+
+		/// Return the target of a texture instance.
+		target_type target() const{return this->Target;}
+
+		/// Return the texture instance format
+		format_type format() const;
+
+		swizzles_type swizzles() const;
+
+		/// Return the base layer of the texture instance, effectively a memory offset in the actual texture storage_type to identify where to start reading the layers. 
+		size_type base_layer() const;
+
+		/// Return the max layer of the texture instance, effectively a memory offset to the beginning of the last layer in the actual texture storage_type that the texture instance can access. 
+		size_type max_layer() const;
+
+		/// Return max_layer() - base_layer() + 1
+		size_type layers() const;
+
+		/// Return the base face of the texture instance, effectively a memory offset in the actual texture storage_type to identify where to start reading the faces. 
+		size_type base_face() const;
+
+		/// Return the max face of the texture instance, effectively a memory offset to the beginning of the last face in the actual texture storage_type that the texture instance can access. 
+		size_type max_face() const;
+
+		/// Return max_face() - base_face() + 1
+		size_type faces() const;
+
+		/// Return the base level of the texture instance, effectively a memory offset in the actual texture storage_type to identify where to start reading the levels. 
+		size_type base_level() const;
+
+		/// Return the max level of the texture instance, effectively a memory offset to the beginning of the last level in the actual texture storage_type that the texture instance can access. 
+		size_type max_level() const;
+
+		/// Return max_level() - base_level() + 1.
+		size_type levels() const;
+
+		/// Return the size of a texture instance: width, height and depth.
+		extent_type extent(size_type Level = 0) const;
+
+		/// Return the memory size of a texture instance storage_type in bytes.
+		size_type size() const;
+
+		/// Return the number of blocks contained in a texture instance storage_type.
+		/// genType size must match the block size conresponding to the texture format.
+		template <typename genType>
+		size_type size() const;
+
+		/// Return the memory size of a specific level identified by Level.
+		size_type size(size_type Level) const;
+
+		/// Return the memory size of a specific level identified by Level.
+		/// genType size must match the block size conresponding to the texture format.
+		template <typename gen_type>
+		size_type size(size_type Level) const;
+
+		/// Return a pointer to the beginning of the texture instance data.
+		void* data();
+
+		/// Return a pointer of type genType which size must match the texture format block size
+		template <typename gen_type>
+		gen_type* data();
+
+		/// Return a pointer to the beginning of the texture instance data.
+		void const* data() const;
+
+		/// Return a pointer of type genType which size must match the texture format block size
+		template <typename gen_type>
+		gen_type const* data() const;
+
+		/// Return a pointer to the beginning of the texture instance data.
+		void* data(size_type Layer, size_type Face, size_type Level);
+
+		/// Return a pointer to the beginning of the texture instance data.
+		void const* const data(size_type Layer, size_type Face, size_type Level) const;
+
+		/// Return a pointer of type genType which size must match the texture format block size
+		template <typename gen_type>
+		gen_type* data(size_type Layer, size_type Face, size_type Level);
+
+		/// Return a pointer of type genType which size must match the texture format block size
+		template <typename gen_type>
+		gen_type const* const data(size_type Layer, size_type Face, size_type Level) const;
+
+		/// Clear the entire texture storage_linear with zeros
+		void clear();
+
+		/// Clear the entire texture storage_linear with Texel which type must match the texture storage_linear format block size
+		/// If the type of gen_type doesn't match the type of the texture format, no conversion is performed and the data will be reinterpreted as if is was of the texture format. 
+		template <typename gen_type>
+		void clear(gen_type const& Texel);
+
+		/// Clear a specific image of a texture.
+		template <typename gen_type>
+		void clear(size_type Layer, size_type Face, size_type Level, gen_type const& BlockData);
+
+		/// Clear a subset of a specific image of a texture.
+		template <typename gen_type>
+		void clear(size_type Layer, size_type Face, size_type Level, extent_type const& TexelOffset, extent_type const& TexelExtent, gen_type const& BlockData);
+
+		/// Copy a specific image of a texture 
+		void copy(
+			texture const& TextureSrc,
+			size_t LayerSrc, size_t FaceSrc, size_t LevelSrc,
+			size_t LayerDst, size_t FaceDst, size_t LevelDst);
+
+		/// Copy a subset of a specific image of a texture 
+		void copy(
+			texture const& TextureSrc,
+			size_t LayerSrc, size_t FaceSrc, size_t LevelSrc, extent_type const& OffsetSrc,
+			size_t LayerDst, size_t FaceDst, size_t LevelDst, extent_type const& OffsetDst,
+			extent_type const& Extent);
+
+		/// Reorder the component in texture memory.
+		template <typename gen_type>
+		void swizzle(gli::swizzles const& Swizzles);
+
+		/// Fetch a texel from a texture. The texture format must be uncompressed.
+		template <typename gen_type>
+		gen_type load(extent_type const & TexelCoord, size_type Layer, size_type Face, size_type Level) const;
+
+		/// Write a texel to a texture. The texture format must be uncompressed.
+		template <typename gen_type>
+		void store(extent_type const& TexelCoord, size_type Layer, size_type Face, size_type Level, gen_type const& Texel);
+
+	protected:
+		std::shared_ptr<storage_type> Storage;
+		target_type Target;
+		format_type Format;
+		size_type BaseLayer;
+		size_type MaxLayer;
+		size_type BaseFace;
+		size_type MaxFace;
+		size_type BaseLevel;
+		size_type MaxLevel;
+		swizzles_type Swizzles;
+
+		// Pre compute at texture instance creation some information for faster access to texels
+		struct cache
+		{
+		public:
+			enum ctor
+			{
+				DEFAULT
+			};
+
+			explicit cache(ctor)
+			{}
+
+			cache
+			(
+				storage_type& Storage,
+				format_type Format,
+				size_type BaseLayer, size_type Layers,
+				size_type BaseFace, size_type MaxFace,
+				size_type BaseLevel, size_type MaxLevel
+			)
+				: Faces(MaxFace - BaseFace + 1)
+				, Levels(MaxLevel - BaseLevel + 1)
+			{
+				GLI_ASSERT(static_cast<size_t>(gli::levels(Storage.extent(0))) < this->ImageMemorySize.size());
+
+				this->BaseAddresses.resize(Layers * this->Faces * this->Levels);
+
+				for(size_type Layer = 0; Layer < Layers; ++Layer)
+				for(size_type Face = 0; Face < this->Faces; ++Face)
+				for(size_type Level = 0; Level < this->Levels; ++Level)
+				{
+					size_type const Index = index_cache(Layer, Face, Level);
+					this->BaseAddresses[Index] = Storage.data() + Storage.base_offset(
+						BaseLayer + Layer, BaseFace + Face, BaseLevel + Level);
+				}
+
+				for(size_type Level = 0; Level < this->Levels; ++Level)
+				{
+					extent_type const& SrcExtent = Storage.extent(BaseLevel + Level);
+					extent_type const& DstExtent = SrcExtent * block_extent(Format) / Storage.block_extent();
+
+					this->ImageExtent[Level] = glm::max(DstExtent, extent_type(1));
+					this->ImageMemorySize[Level] = Storage.level_size(BaseLevel + Level);
+				}
+				
+				this->GlobalMemorySize = Storage.layer_size(BaseFace, MaxFace, BaseLevel, MaxLevel) * Layers;
+			}
+
+			// Base addresses of each images of a texture.
+			data_type* get_base_address(size_type Layer, size_type Face, size_type Level) const
+			{
+				return this->BaseAddresses[index_cache(Layer, Face, Level)];
+			}
+
+			// In texels
+			extent_type get_extent(size_type Level) const
+			{
+				return this->ImageExtent[Level];
+			};
+
+			// In bytes
+			size_type get_memory_size(size_type Level) const
+			{
+				return this->ImageMemorySize[Level];
+			};
+
+			// In bytes
+			size_type get_memory_size() const
+			{
+				return this->GlobalMemorySize;
+			};
+
+		private:
+			size_type index_cache(size_type Layer, size_type Face, size_type Level) const
+			{
+				return ((Layer * this->Faces) + Face) * this->Levels + Level;
+			}
+
+			size_type Faces;
+			size_type Levels;
+      /**
+      原理：纹理中每一个具体的“切片”（即某一层的某一面的某一层级）在物理内存中的起始位置是不规则的（因为不同层级的 Mipmap 大小不同，数据块大小也不同）。如果每次访问都要通过复杂的数学公式计算偏移量，效率较低。
+       */
+			std::vector<data_type*> BaseAddresses; //是一个指针数组（或者偏移量数组）。预先计算好每一个 (Layer, Face, Level) 组合对应的内存地址，并将其存储在 BaseAddresses 数组中
+			std::array<extent_type, 16> ImageExtent; //存储每个level的extent
+			std::array<size_type, 16> ImageMemorySize;
+			size_type GlobalMemorySize;
+		} Cache;
+	};
+```
+
+```c++
+  //先遍历layer，再遍历face，最后遍历level
+  for(size_type Layer = 0; Layer < Layers; ++Layer)//遍历纹理数组
+  for(size_type Face = 0; Face < this->Faces; ++Face)//遍历立方体贴图的6个面
+  for(size_type Level = 0; Level < this->Levels; ++Level)//遍历LOD层次
+  {
+    size_type const Index = index_cache(Layer, Face, Level);
+    this->BaseAddresses[Index] = Storage.data() + Storage.base_offset(
+      BaseLayer + Layer, BaseFace + Face, BaseLevel + Level);
+  }
+```
+
+```c++
+//底层数据存储结构
+class storage_linear
+	{
+	public:
+		typedef extent3d extent_type;
+		typedef size_t size_type;
+		typedef gli::format format_type;
+		typedef gli::byte data_type;
+
+	public:
+		storage_linear();
+
+		storage_linear(
+			format_type Format,
+			extent_type const & Extent,
+			size_type Layers,
+			size_type Faces,
+			size_type Levels);
+
+		bool empty() const;
+		size_type size() const; // Express is bytes
+		size_type layers() const;
+		size_type levels() const;
+		size_type faces() const;
+
+		size_type block_size() const;
+		extent_type block_extent() const;
+		extent_type block_count(size_type Level) const;
+		extent_type extent(size_type Level) const;
+
+		data_type* data();
+		data_type const* const data() const;
+
+		/// Compute the relative memory offset to access the data for a specific layer, face and level
+		size_type base_offset(
+			size_type Layer,
+			size_type Face,
+			size_type Level) const;
+
+		size_type image_offset(extent1d const& Coord, extent1d const& Extent) const;
+
+		size_type image_offset(extent2d const& Coord, extent2d const& Extent) const;
+
+		size_type image_offset(extent3d const& Coord, extent3d const& Extent) const;
+
+		/// Copy a subset of a specific image of a texture 
+		void copy(
+			storage_linear const& StorageSrc,
+			size_t LayerSrc, size_t FaceSrc, size_t LevelSrc, extent_type const& BlockIndexSrc,
+			size_t LayerDst, size_t FaceDst, size_t LevelDst, extent_type const& BlockIndexDst,
+			extent_type const& BlockCount);
+
+		size_type level_size(
+			size_type Level) const;
+		size_type face_size(
+			size_type BaseLevel, size_type MaxLevel) const;
+		size_type layer_size(
+			size_type BaseFace, size_type MaxFace,
+			size_type BaseLevel, size_type MaxLevel) const;
+
+	private:
+		size_type const Layers;
+		size_type const Faces;
+		size_type const Levels;
+		size_type const BlockSize;
+		extent_type const BlockCount;
+		extent_type const BlockExtent;
+		extent_type const Extent;
+		std::vector<data_type> Data;
+	};
+```
+
+
+```c++
+/// Image, representation for a single texture level
+	class image
+	{
+	private:
+		friend class texture1d;
+		friend class texture2d;
+		friend class texture3d;
+
+	public:
+		typedef size_t size_type;
+		typedef gli::format format_type;
+		typedef storage_linear::extent_type extent_type;
+		typedef storage_linear::data_type data_type;
+
+		/// Create an empty image instance
+		image();
+
+		/// Create an image object and allocate an image storoge for it.
+		explicit image(format_type Format, extent_type const& Extent);
+
+		/// Create an image object by sharing an existing image storage_linear from another image instance.
+		/// This image object is effectively an image view where format can be reinterpreted
+		/// with a different compatible image format.
+		/// For formats to be compatible, the block size of source and destination must match.
+		explicit image(image const& Image, format_type Format);
+
+		/// Return whether the image instance is empty, no storage_linear or description have been assigned to the instance.
+		bool empty() const;
+
+		/// Return the image instance format.
+		format_type format() const;
+
+		/// Return the dimensions of an image instance: width, height and depth.
+		extent_type extent() const;
+
+		/// Return the memory size of an image instance storage_linear in bytes.
+		size_type size() const;
+
+		/// Return the number of blocks contained in an image instance storage_linear.
+		/// genType size must match the block size conresponding to the image format. 
+		template <typename genType>
+		size_type size() const;
+
+		/// Return a pointer to the beginning of the image instance data.
+		void* data();
+
+		/// Return a pointer to the beginning of the image instance data.
+		void const* data() const;
+
+		/// Return a pointer of type genType which size must match the image format block size.
+		template <typename genType>
+		genType* data();
+
+		/// Return a pointer of type genType which size must match the image format block size.
+		template <typename genType>
+		genType const* data() const;
+
+		/// Clear the entire image storage_linear with zeros
+		void clear();
+
+		/// Clear the entire image storage_linear with Texel which type must match the image storage_linear format block size
+		/// If the type of genType doesn't match the type of the image format, no conversion is performed and the data will be reinterpreted as if is was of the image format. 
+		template <typename genType>
+		void clear(genType const& Texel);
+
+		/// Load the texel located at TexelCoord coordinates.
+		/// It's an error to call this function if the format is compressed.
+		/// It's an error if TexelCoord values aren't between [0, dimensions].
+		template <typename genType>
+		genType load(extent_type const& TexelCoord);
+
+		/// Store the texel located at TexelCoord coordinates.
+		/// It's an error to call this function if the format is compressed.
+		/// It's an error if TexelCoord values aren't between [0, dimensions].
+		template <typename genType>
+		void store(extent_type const& TexelCoord, genType const& Data);
+
+	private:
+		/// Create an image object by sharing an existing image storage_linear from another image instance.
+		/// This image object is effectively an image view where the layer, the face and the level allows identifying
+		/// a specific subset of the image storage_linear source. 
+		/// This image object is effectively a image view where the format can be reinterpreted
+		/// with a different compatible image format.
+		explicit image(
+			std::shared_ptr<storage_linear> Storage,
+			format_type Format,
+			size_type BaseLayer,
+			size_type BaseFace,
+			size_type BaseLevel);
+
+		std::shared_ptr<storage_linear> Storage;
+		format_type const Format;
+		size_type const BaseLevel;
+		data_type* Data;
+		size_type const Size;
+
+		data_type* compute_data(size_type BaseLayer, size_type BaseFace, size_type BaseLevel);
+		size_type compute_size(size_type Level) const;
+	};
+```
 
 ## 数学库
 glm
