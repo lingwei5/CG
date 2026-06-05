@@ -11,6 +11,339 @@
 https://github.com/libigl/libigl 几何处理库 网格处理 参数化(纹理映射 uv展开) https://www.alecjacobson.com/weblog/4500.html 是一个uv编辑器
 
 ### assimp
+```c++ 
+//核心数据结构
+struct ASSIMP_API aiScene {
+    /** Any combination of the AI_SCENE_FLAGS_XXX flags. By default
+    * this value is 0, no flags are set. Most applications will
+    * want to reject all scenes with the AI_SCENE_FLAGS_INCOMPLETE
+    * bit set.
+    */
+    unsigned int mFlags;
+
+    /** The root node of the hierarchy.
+    *
+    * There will always be at least the root node if the import
+    * was successful (and no special flags have been set).
+    * Presence of further nodes depends on the format and content
+    * of the imported file.
+    */
+    C_STRUCT aiNode* mRootNode;
+
+    /** The number of meshes in the scene. */
+    unsigned int mNumMeshes;
+
+    /** The array of meshes.
+    *
+    * Use the indices given in the aiNode structure to access
+    * this array. The array is mNumMeshes in size. If the
+    * AI_SCENE_FLAGS_INCOMPLETE flag is not set there will always
+    * be at least ONE material.
+    */
+    C_STRUCT aiMesh** mMeshes;
+
+    /** The number of materials in the scene. */
+    unsigned int mNumMaterials;
+
+    /** The array of materials.
+    *
+    * Use the index given in each aiMesh structure to access this
+    * array. The array is mNumMaterials in size. If the
+    * AI_SCENE_FLAGS_INCOMPLETE flag is not set there will always
+    * be at least ONE material.
+    */
+    C_STRUCT aiMaterial** mMaterials;
+
+    /** The number of animations in the scene. */
+    unsigned int mNumAnimations;
+
+    /** The array of animations.
+    *
+    * All animations imported from the given file are listed here.
+    * The array is mNumAnimations in size.
+    */
+    C_STRUCT aiAnimation** mAnimations;
+
+    /** The number of textures embedded into the file */
+    unsigned int mNumTextures;
+
+    /** The array of embedded textures.
+    *
+    * Not many file formats embed their textures into the file.
+    * An example is Quake's MDL format (which is also used by
+    * some GameStudio versions)
+    */
+    C_STRUCT aiTexture** mTextures;
+
+    /** The number of light sources in the scene. Light sources
+    * are fully optional, in most cases this attribute will be 0
+        */
+    unsigned int mNumLights;
+
+    /** The array of light sources.
+    *
+    * All light sources imported from the given file are
+    * listed here. The array is mNumLights in size.
+    */
+    C_STRUCT aiLight** mLights;
+
+    /** The number of cameras in the scene. Cameras
+    * are fully optional, in most cases this attribute will be 0
+        */
+    unsigned int mNumCameras;
+
+    /** The array of cameras.
+    *
+    * All cameras imported from the given file are listed here.
+    * The array is mNumCameras in size. The first camera in the
+    * array (if existing) is the default camera view into
+    * the scene.
+    */
+    C_STRUCT aiCamera** mCameras;
+
+    /**
+     *  @brief  The global metadata assigned to the scene itself.
+     *
+     *  This data contains global metadata which belongs to the scene like
+     *  unit-conversions, versions, vendors or other model-specific data. This
+     *  can be used to store format-specific metadata as well.
+     */
+    C_STRUCT aiMetadata* mMetaData;
+
+    /** The name of the scene itself.
+     */
+    C_STRUCT aiString mName;
+
+    /**
+     *
+     */
+    unsigned int mNumSkeletons;
+
+    /**
+     *
+     */
+    C_STRUCT aiSkeleton **mSkeletons;
+
+#ifdef __cplusplus
+
+    //! Default constructor - set everything to 0/nullptr
+    aiScene();
+
+    //! Destructor
+    ~aiScene();
+
+    //! Check whether the scene contains meshes
+    //! Unless no special scene flags are set this will always be true.
+    inline bool HasMeshes() const {
+        return mMeshes != nullptr && mNumMeshes > 0;
+    }
+
+    //! Check whether the scene contains materials
+    //! Unless no special scene flags are set this will always be true.
+    inline bool HasMaterials() const {
+        return mMaterials != nullptr && mNumMaterials > 0;
+    }
+
+    //! Check whether the scene contains lights
+    inline bool HasLights() const {
+        return mLights != nullptr && mNumLights > 0;
+    }
+
+    //! Check whether the scene contains textures
+    inline bool HasTextures() const {
+        return mTextures != nullptr && mNumTextures > 0;
+    }
+
+    //! Check whether the scene contains cameras
+    inline bool HasCameras() const {
+        return mCameras != nullptr && mNumCameras > 0;
+    }
+
+    //! Check whether the scene contains animations
+    inline bool HasAnimations() const {
+        return mAnimations != nullptr && mNumAnimations > 0;
+    }
+
+    //! Check whether the scene contains skeletons
+    inline bool HasSkeletons() const {
+        return mSkeletons != nullptr && mNumSkeletons > 0;
+    }
+
+    //! Returns a short filename from a full path
+    static const char* GetShortFilename(const char* filename) {
+        const char* lastSlash = strrchr(filename, '/');
+        const char* lastBackSlash = strrchr(filename, '\\');
+        if (lastSlash < lastBackSlash) {
+            lastSlash = lastBackSlash;
+        }
+        const char* shortFilename = lastSlash != nullptr ? lastSlash + 1 : filename;
+        return shortFilename;
+    }
+
+    //! Returns an embedded texture
+    const aiTexture* GetEmbeddedTexture(const char* filename) const {
+        return GetEmbeddedTextureAndIndex(filename).first;
+    }
+
+    //! Returns an embedded texture and its index
+    std::pair<const aiTexture*, int> GetEmbeddedTextureAndIndex(const char* filename) const {
+        if (nullptr==filename) {
+            return std::make_pair(nullptr, -1);
+        }
+        // lookup using texture ID (if referenced like: "*1", "*2", etc.)
+        if ('*' == *filename) {
+            int index = std::atoi(filename + 1);
+            if (0 > index || mNumTextures <= static_cast<unsigned>(index)) {
+                return std::make_pair(nullptr, -1);
+            }
+            return std::make_pair(mTextures[index], index);
+        }
+        // lookup using filename
+        const char* shortFilename = GetShortFilename(filename);
+        if (nullptr == shortFilename) {
+            return std::make_pair(nullptr, -1);
+        }
+
+        for (unsigned int i = 0; i < mNumTextures; i++) {
+            const char* shortTextureFilename = GetShortFilename(mTextures[i]->mFilename.C_Str());
+            if (strcmp(shortTextureFilename, shortFilename) == 0) {
+                return std::make_pair(mTextures[i], static_cast<int>(i));
+            }
+        }
+        return std::make_pair(nullptr, -1);
+    }
+
+    /**
+     * @brief Will try to locate a bone described by its name.
+     *
+     * @param name  The name to look for.
+     * @return The bone as a pointer.
+     */
+    inline aiBone *findBone(const aiString &name) const {
+        for (size_t m = 0; m < mNumMeshes; m++) {
+            aiMesh *mesh = mMeshes[m];
+            if (mesh == nullptr) {
+                continue;
+            }
+
+            for (size_t b = 0; b < mesh->mNumBones; b++) {
+                aiBone *bone = mesh->mBones[b];
+                if (bone == nullptr) {
+                    continue;
+                }
+                if (name == bone->mName) {
+                    return bone;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+#endif // __cplusplus
+
+    /**  Internal data, do not touch */
+#ifdef __cplusplus
+    void* mPrivate;
+#else
+    char* mPrivate;
+#endif
+
+};
+```
+
+1. aiScene 是整个导入场景的根结构，包含所有导入的数据。
+
+- 主要成员变量:
+  - mFlags: 场景标志位（如 AI_SCENE_FLAGS_INCOMPLETE 表示场景不完整）。
+  - mRootNode: 场景图的根节点。
+  - mMeshes: 网格数组（所有模型的几何数据）。
+  - mMaterials: 材质数组（定义网格的渲染属性）。
+  - mAnimations: 动画数组（骨骼动画、关键帧动画等）。
+  - mTextures: 嵌入纹理数组（如 MDL 格式的内嵌纹理）。
+  - mLights: 光源数组（可选）。
+  - mCameras: 摄像机数组（可选）。
+  - mMetaData: 场景的全局元数据（如单位、版本等）。
+  - mName: 场景名称。
+  - mSkeletons: 骨架数组（用于骨骼动画）。
+
+2. aiNode是一个多叉树结构
+```c++
+//多叉树结构 父子层级
+class aiNode {
+    C_STRUCT aiString mName;
+
+    /** The transformation relative to the node's parent. */
+    C_STRUCT aiMatrix4x4 mTransformation;
+
+    /** Parent node. nullptr if this node is the root node. */
+    C_STRUCT aiNode* mParent;
+
+    /** The number of child nodes of this node. */
+    unsigned int mNumChildren;
+
+    /** The child nodes of this node. nullptr if mNumChildren is 0. */
+    C_STRUCT aiNode** mChildren;
+
+    /** The number of meshes of this node. */
+    unsigned int mNumMeshes;
+
+    /** The meshes of this node. Each entry is an index into the
+      * mesh list of the #aiScene.
+      */
+    unsigned int* mMeshes;
+
+    /** Metadata associated with this node or nullptr if there is no metadata.
+      *  Whether any metadata is generated depends on the source file format. See the
+      * @link importer_notes @endlink page for more information on every source file
+      * format. Importers that don't document any metadata don't write any.
+      */
+    C_STRUCT aiMetadata* mMetaData;
+}
+```
+
+3. aiMesh 表示一个材质一样的网格，包含顶点、法线、纹理坐标、面等信息。
+   - mVertices: aiVector3D* 顶点数组
+   - mNormals: aiVector3D* 法线数组
+   - mTangents: aiVector3D* 切线数组
+   - mBitangents: aiVector3D* 副切线数组
+   - mTextureCoords: aiVector3D* 纹理坐标数组
+   - mColors: aiColor4D* 颜色数组
+   - mFaces: aiFace* 面数组（由顶点索引组成）
+   - mBones: aiBone** 骨骼数组（用于骨骼动画）
+   - mAnimMeshes: aiAnimMesh** 动画网格数组
+4. aiBone 骨头 一块骨头
+   - mName: aiString
+   - mNumberWeights: int
+   - mArmature: aiNode*
+   - mNode: aiNode*
+   - mWeights: aiVertexWeight 包含该bone影响的顶点索引及对应的权重，一个顶点可能受多个aiBone影响，所有影响该顶点的aiBone的权重和应为1.0
+   - mOffsetMatrix: aiMatrix4x4 偏移矩阵/逆绑定姿势矩阵(inverse bind pose matrix) 从模型空间转到骨骼空间 顶点最终位置 = CurrentBoneTransform * mOffsetMatrix * OriginalVertexPosition
+5. aiSkeleton 骨骼系统/骨架 骨骼树 Skeleton是由多块 bone通过关节连接而成的完整系统 表示动画的骨骼层级A skeleton represents the bone hierarchy of an animation.
+   - mName
+   - mNumBones
+   - mBones: aiSkeletonBone**
+6. aiSkeletonBone
+7. aiMaterial
+   - C_STRUCT aiMaterialProperty **mProperties;
+   - unsigned int mNumProperties;      // 属性数量
+   - unsigned int mNumAllocated;       // 已分配的存储空间
+8. aiMaterialProperty
+   ```c++
+	struct aiMaterialProperty {
+		C_STRUCT aiString mKey;           // 属性名（键）
+		unsigned int mSemantic;           // 语义（主要用于纹理）
+		unsigned int mIndex;              // 索引（用于同类型多纹理）
+		unsigned int mDataLength;         // 数据长度（字节）
+		C_ENUM aiPropertyTypeInfo mType;  // 数据类型
+		char *mData;                      // 数据缓冲区
+	}
+   ```
+9.  aiAnimation
+10. aiTexture
+11. aiLight
+12. aiCamera
+13. aiMetadata
+14. 
 
 ### tinyobjloader
 ```c++
