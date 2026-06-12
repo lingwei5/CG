@@ -8,7 +8,7 @@ Unreal Engine 5.x Documentation
 
 
 https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-4-terminology?application_version=4.27
-1. object->actor可以放置在场景world中的object->pawn可以进行控制的actor->character人形pawn
+1. object->actor可以放置在场景world中的object  actor->pawn可以进行控制的actor(non-player characters)  pawn->character人形pawn
 2. content browser里的东西应该都是project的asset，包含![alt text](ue内容浏览器可创建的asset.png)
    1. 基本资产material ，paticle-system， level 以及 blueprint class
    2. 高级资产，如特效 动画 物理 声音 ai等
@@ -91,6 +91,7 @@ collection：自定义的asset引用的集合，
 ## 项目与模板
 ## 项目设置
 ## 关卡
+每一个关卡都是一个独立的.umap文件，所以有时关卡也称为地图
 ## 资产与内容包
 ## actor与geometry
 ## 游戏与模拟
@@ -116,6 +117,125 @@ collection：自定义的asset引用的集合，
 
 # build virtual world
 # Design Visuals, Rendering, and Graphics
+
+## Materials
+![alt text](<MaterialEditor UI.png>)  
+1	Menu Bar  
+2	Toolbar  
+3	Viewport Panel  
+4	Details Panel  
+5	Material Graph Panel  
+6	Stats Panel  
+7	Palette Panel  
+
+### Essential Material Concepts
+shader graph   
+material graph  
+material expression:每个node貌似都是一个  
+material function  
+main material node  
+
+材质编辑器中的 材质图面板里，材质图是那个图，里面的节点有材质表达式和材质函数，材质表达式（Material Expressions） 和 材质函数（Material Functions） 是在虚幻引擎中创建功能齐全材质的基本单位。每个表达式或函数都是材质图表中完全独立的节点。 这些节点对其输入运行HLSL代码的小片段，并输出结果。  
+
+The main difference between Material Expressions and Functions is that Material Expressions are created directly in the source code of the engine, while Material Functions exist as editable assets in the Content Browser.材质表达式是引擎内嵌的，只能通过改源码改动；材质函数可以通过编辑器进行编辑
+
+可以对材质的数据进行append合并或者componentmask拆解，以方便输出不同的通道
+
+### Physically Based Materials
+
+<!-- #### PBR Material Attributes -->
+#### base color
+![alt text](<base color.png>)  
+Measured BaseColor values for nonmetals (intensity only):
+Material	BaseColor Intensity
+Charcoal	0.02
+Fresh asphalt	0.02
+Worn asphalt	0.08
+Bare soil	0.13
+Green grass	0.21
+Desert sand	0.36
+Fresh concrete	0.51
+Ocean Ice	0.56
+Fresh snow	0.81
+
+Measured BaseColors for metals:
+Material	BaseColor (R, G, B)
+Iron	(0.560, 0.570, 0.580)
+Silver	(0.972, 0.960, 0.915)
+Aluminum	(0.913, 0.921, 0.925)
+Gold	(1.000, 0.766, 0.336)
+Copper	(0.955, 0.637, 0.538)
+Chromium	(0.550, 0.556, 0.554)
+Nickel	(0.660, 0.609, 0.526)
+Titanium	(0.542, 0.497, 0.449)
+Cobalt	(0.662, 0.655, 0.634)
+Platinum	(0.672, 0.637, 0.585)
+
+#### roughness
+![alt text](非金属粗糙度效果.png)  
+ 
+![alt text](金属粗糙度效果.png)
+
+![alt text](metal_roughness/金属粗糙度变化.png) ![alt text](metal_roughness/金属粗糙度变化-1.png) ![alt text](metal_roughness/金属粗糙度变化-2.png) 
+![alt text](metal_roughness/金属粗糙度变化-3.png) ![alt text](metal_roughness/金属粗糙度变化-4.png) ![alt text](metal_roughness/金属粗糙度变化-5.png)
+![alt text](metal_roughness/金属粗糙度变化-6.png) ![alt text](metal_roughness/金属粗糙度变化-7.png) ![alt text](metal_roughness/金属粗糙度变化-8.png)
+![alt text](metal_roughness/金属粗糙度变化-9.png) ![alt text](metal_roughness/金属粗糙度变化-10.png) ![alt text](metal_roughness/金属粗糙度变化-11.png) 
+![alt text](metal_roughness/金属粗糙度变化-12.png) ![alt text](metal_roughness/金属粗糙度变化-13.png) ![alt text](metal_roughness/金属粗糙度变化-14.png)
+![alt text](metal_roughness/金属粗糙度变化-15.png) ![alt text](metal_roughness/金属粗糙度变化-16.png) ![alt text](metal_roughness/金属粗糙度变化-17.png)
+![alt text](metal_roughness/金属粗糙度变化-18.png) ![alt text](metal_roughness/金属粗糙度变化-19.png) ![alt text](metal_roughness/金属粗糙度变化-20.png)
+
+#### metallic
+![alt text](金属度效果.png)
+![alt text](metalic/image.png)
+![alt text](metalic/image-1.png)
+![alt text](metalic/image-2.png)
+![alt text](metalic/image-3.png)
+![alt text](metalic/image-4.png)
+![alt text](metalic/image-5.png)
+![alt text](metalic/image-6.png)
+![alt text](metalic/image-7.png)
+![alt text](metalic/image-8.png)
+![alt text](metalic/image-9.png)
+![alt text](metalic/image-10.png)
+
+#### mapping metalic
+with a coat of paint covering some or all of the metal金属上漆(车身)
+一个二值的mask，金属部分为1，非金属部分为0，金属度乘以这个mask，就可以得到金属度在金属部分为1，非金属部分为0的效果
+
+#### specular
+The Specular input takes a value between 0 and 1, and controls how much specular light the surface reflects.
+
+A Specular value of 0 is fully non-reflective.
+A Specular value of 1 is fully reflective.
+
+#### Cavity Maps
+One reason to modify Specular is to add micro occlusion or small scale shadowing, say from cracks represented in the normal map. These are sometimes referred to as cavities. Small scale geometry, especially details only present in the high poly and baked into the normal map, will not be picked up by the renderer's real-time shadows.
+
+To capture this shadowing, you can generate a cavity map, which is typically an AO map with very short trace distance. This is multiplied by the final BaseColor before output and multiplied with 0.5 (Specular default) as the Specular output.
+
+To be clear this is BaseColor = CavityOldBaseColor, Specular = Cavity0.5.
+
+For advanced use, this can be used to control the index of refraction (IOR). We have not found this to be necessary for 99% of Materials. Below are Specular values based off of measured IOR.
+
+### Material Propeties
+https://dev.epicgames.com/documentation/unreal-engine/unreal-engine-material-properties 列出了有哪些材质 已经这些的含义
+
+### Material Inputs
+### Material Editor Guide
+### Material Instances
+![alt text](MaterialInstanceEditor.png)  
+1 Toolbar - Save your asset, locate it in the Content Browser, show hidden parameters, display inheritance hierarchy and platform stats.
+2 Viewport - A realtime viewport showing a preview of the Material instance.
+3 Viewport display options - Allows you to edit the camera and display settings in the viewport, and change the mesh used for the Material preview.
+4 Details Panel - All exposed Material parameters and properties are found here  
+### Material Functions
+可以把材质图的一部分打包成可复用的资产
+### Decals
+### Layered Materials
+### Material Expression Reference
+
+
+## XR
 # Create Visual Effects
 # Gameplay Tutorials
 # Blueprint Visual Scripts
