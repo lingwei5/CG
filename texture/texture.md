@@ -475,6 +475,336 @@ nvidia的 AtlasCreationTool、AtalsComparasionViewer是制作纹理图集的工�
 也可以由最小尺寸的纹理决定图集的mipmap level, 但是效果不好  
 也可以只选择尺寸一样的纹理放到一个atlas里
 
+## TBN空间 切线空间 法线贴图
+
+### 一、定义
+
+**TBN 空间**是切线空间（Tangent Space）的具体实现，由三个基向量构成的正交坐标系：
+
+| 向量 | 含义 | 方向 |
+|---|---|---|
+| **T** (Tangent) | 切线 | 沿纹理坐标 u 方向 |
+| **B** (Bitangent/Binormal) | 副切线 | 沿纹理坐标 v 方向 |
+| **N** (Normal) | 法线 | 垂直于表面 |
+
+三个向量两两正交，构成一个右手坐标系（或左手，取决于约定），用于在三角形面上建立局部坐标。
+
+### 二、为什么需要 TBN 空间
+
+#### 核心问题：法线贴图存的是哪个空间的法线？
+
+法线贴图（normal map）上的 RGB 颜色代表 [0,1]→[-1,1] 的法线方向。如果存**模型空间**法线：
+- 模型旋转/变形时，法线就错了
+- 同一个平面（不同朝向）无法复用同一张法线贴图
+
+**解决方案**：法线贴图存**TBN 空间**的法线——也就是"相对于该三角形的局部坐标系"的法线。
+
+```
+法线贴图存的是切线空间下的法线方向
+   ↓
+渲染时把 TBN 空间的法线变换回世界空间
+   ↓
+得到正确的世界空间法线，用于光照
+```
+
+### 三、TBN 矩阵的数学推导
+
+#### 几何关系
+
+对三角形三个顶点 P0, P1, P2，对应 UV 坐标 (u0,v0), (u1,v1), (u2,v2)：
+
+```
+E1 = P1 - P0     ΔU1 = u1 - u0     ΔV1 = v1 - v0
+E2 = P2 - P0     ΔU2 = u2 - u0     ΔV2 = v2 - v0
+```
+
+T 和 B 沿 E1, E2 方向，但与 UV 变化方向对齐：
+
+```
+T · ΔU1 + B · ΔV1 = E1
+T · ΔU2 + B · ΔV2 = E2
+```
+
+矩阵形式：
+
+```
+[ T.x B.x ]   [ ΔU1 ΔU2 ]⁻¹   [ E1.x E2.x ]
+[ T.y B.y ] = [ ΔV1 ΔV2 ]     · [ E1.y E2.y ]
+[ T.z B.z ]                    [ E1.z E2.z ]
+```
+
+#### 显式公式（Gram-Schmidt 正交化前）
+
+```
+r = 1 / (ΔU1·ΔV2 - ΔU2·ΔV1)
+T = (ΔV2·E1 - ΔV1·E2) · r
+B = (ΔU1·E2 - ΔU2·E1) · r
+```
+
+#### Gram-Schmidt 正交化
+
+```
+T = normalize(T - dot(T, N)·N)
+B = cross(N, T)   // 或反向，取决于约定
+```
+
+### 四、两个变换方向
+
+#### 1. TBN → World（最常用）
+
+把法线贴图中的切线空间法线**变换到世界空间**：
+
+```glsl
+vec3 N_world = TBN * N_tangent;
+```
+
+矩阵：
+
+```
+TBN = | T.x  B.x  N.x |
+      | T.y  B.y  N.y |
+      | T.z  B.z  N.z |
+```
+
+#### 2. World → TBN（反向，效率更高）
+
+把光照向量 L、视线向量 V **变换到切线空间**，在切线空间做光照计算：
+
+```glsl
+vec3 L_tangent = transpose(TBN) * L_world;
+```
+
+优点：`transpose` 比 `inverse` 便宜（正交矩阵的逆=转置），且顶点着色器算一次即可，片段着色器无需重算。
+
+### 五、使用场景
+
+| 场景 | 作用 |
+|---|---|
+| **法线贴图** | 把切线空间法线变换到世界空间做光照 |
+| **视差贴图** | 在切线空间计算视线方向用于偏移 UV |
+| **PBR / IBL** | 切线空间法线采样环境贴图 |
+| **位移贴图** | 沿切线空间方向偏移顶点 |
+| **各向异性 BRDF** | 沿 T/B 方向计算各向异性高光（如头发、拉丝金属） |
+
+### 六、代码实现
+
+#### 1. CPU 端计算 TBN（C++ / 加载模型时）
+
+```cpp
+// 计算单个三角形的 TBN
+void ComputeTangentBasis(
+    glm::vec3 p0, glm::vec3 p1, glm::vec3 p2,
+    glm::vec2 uv0, glm::vec2 uv1, glm::vec2 uv2,
+    glm::vec3 normal,
+    glm::vec3& tangent, glm::vec3& bitangent)
+{
+    glm::vec3 e1 = p1 - p0;
+    glm::vec3 e2 = p2 - p0;
+    glm::vec2 dUV1 = uv1 - uv0;
+    glm::vec2 dUV2 = uv2 - uv0;
+
+    float r = 1.0f / (dUV1.x * dUV2.y - dUV1.y * dUV2.x);
+    if (std::isinf(r) || std::isnan(r)) r = 0.0f;  // UV 退化保护
+
+    tangent.x = r * (dUV2.y * e1.x - dUV1.y * e2.x);
+    tangent.y = r * (dUV2.y * e1.y - dUV1.y * e2.y);
+    tangent.z = r * (dUV2.y * e1.z - dUV1.y * e2.z);
+    tangent = glm::normalize(tangent - glm::dot(tangent, normal) * normal);
+
+    bitangent = glm::normalize(glm::cross(normal, tangent));
+}
+```
+
+每个顶点会累加相邻三角形贡献的 T/B，最后归一化：
+
+```cpp
+for (每个顶点 v) {
+    v.tangent   = normalize(v.tangent);
+    v.bitangent  = normalize(v.bitangent);
+    // 再次正交化确保 T⊥N
+    v.tangent  -= dot(v.tangent, v.normal) * v.normal;
+    v.tangent   = normalize(v.tangent);
+    v.bitangent = cross(v.normal, v.tangent);
+}
+```
+
+#### 2. GLSL 顶点着色器（传递 TBN 到片段）
+
+```glsl
+#version 330 core
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexCoords;
+layout(location = 3) in vec3 aTangent;
+layout(location = 4) in vec3 aBitangent;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+out VS_OUT {
+    vec3 FragPos;
+    vec2 TexCoords;
+    mat3 TBN;          // 传递整个 TBN 矩阵
+} vs_out;
+
+void main() {
+    vec4 worldPos = model * vec4(aPos, 1.0);
+    vs_out.FragPos  = worldPos.xyz;
+    vs_out.TexCoords = aTexCoords;
+
+    // 注意：法线要用 normalMatrix = transpose(inverse(model)) 变换
+    mat3 normalMatrix = transpose(inverse(mat3(model)));
+    vec3 N = normalize(normalMatrix * aNormal);
+    vec3 T = normalize(normalMatrix * aTangent);
+    vec3 B = normalize(normalMatrix * aBitangent);
+
+    // Gram-Schmidt 正交化（保证正交）
+    T = normalize(T - dot(T, N) * N);
+    // B = cross(N, T);   // 或直接重新算 B 更稳
+
+    vs_out.TBN = mat3(T, B, N);
+
+    gl_Position = projection * view * worldPos;
+}
+```
+
+#### 3. GLSL 片段着色器（采样法线贴图并变换）
+
+##### 方式 A：TBN → World（推荐，适合 PBR/IBL）
+
+```glsl
+#version 330 core
+in VS_OUT {
+    vec3 FragPos;
+    vec2 TexCoords;
+    mat3 TBN;
+} fs_in;
+
+uniform sampler2D normalMap;
+
+void main() {
+    // 采样法线贴图（[0,1] → [-1,1]）
+    vec3 normalTS = texture(normalMap, fs_in.TexCoords).rgb;
+    normalTS = normalize(normalTS * 2.0 - 1.0);
+
+    // 切线空间 → 世界空间
+    vec3 N = normalize(fs_in.TBN * normalTS);
+
+    // 后续光照计算都用世界空间 N
+    // ...
+}
+```
+
+##### 方式 B：World → TBN（适合简单 Blinn-Phong）
+
+```glsl
+#version 330 core
+in VS_OUT {
+    vec3 FragPos;
+    vec2 TexCoords;
+    mat3 TBN;
+} fs_in;
+
+uniform sampler2D normalMap;
+uniform vec3 lightPos;
+uniform vec3 viewPos;
+
+void main() {
+    // 采样法线（已经是切线空间）
+    vec3 N = texture(normalMap, fs_in.TexCoords).rgb;
+    N = normalize(N * 2.0 - 1.0);
+
+    // 把 L、V 变换到切线空间（用 TBN 的转置=逆）
+    vec3 L = normalize(transpose(fs_in.TBN) * (lightPos - fs_in.FragPos));
+    vec3 V = normalize(transpose(fs_in.TBN) * (viewPos   - fs_in.FragPos));
+
+    // 后续计算都在切线空间
+    float diff = max(dot(N, L), 0.0);
+    // ...
+}
+```
+
+#### 4. Assimp 加载模型时自动计算 TBN
+
+```cpp
+Assimp::Importer importer;
+const aiScene* scene = importer.ReadFile(path,
+    aiProcess_Triangulate |
+    aiProcess_FlipUVs |
+    aiProcess_CalcTangentSpace);   // ← 自动生成 tangent
+
+// 每个 mesh 的每个顶点都有 mTangent 可用
+for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
+    // mesh->mTangents[i]  即可
+}
+```
+
+### 七、关键细节与坑
+
+#### 1. 镜像 UV（mirrored UV）
+
+如果某个三角形 UV 是镜像翻转的（ΔV2 < 0），会导致 B 方向反了：
+
+```cpp
+float handedness = (dot(cross(N, T), B) < 0.0f) ? -1.0f : 1.0f;
+B = handedness * cross(N, T);
+```
+
+GLSL 中同样需要根据 handedness 调整：
+
+```glsl
+vec3 B = handedness * cross(N, T);
+vs_out.TBN = mat3(T, B, N);
+```
+
+#### 2. normalMatrix 的使用
+
+法线、切线、副切线在模型变换（尤其是非均匀缩放）后需要用 `normalMatrix = transpose(inverse(mat3(model)))` 变换，否则方向会错误。
+
+#### 3. 切线空间约定
+
+OpenGL 默认右手系，但有些引擎用左手系。GLSL 中 B 的方向可能要翻转：
+
+```glsl
+// 不同引擎可能有不同约定，注意符号
+vec3 B = cross(N, T);     // OpenGL 约定
+// vec3 B = cross(T, N);  // 某些引擎约定
+```
+
+如果法线贴图看起来"凹凸反了"，通常就是 B 的方向反了。
+
+### 八、流程图总结
+
+```
+顶点数据 (位置, UV, 法线, 切线, 副切线)
+        ↓
+顶点着色器：构造 TBN 矩阵（注意 normalMatrix + Gram-Schmidt）
+        ↓
+片段着色器：采样法线贴图
+        ↓
+        ├── 方式 A：TBN × normal_tangent → normal_world
+        │            （在世界空间做光照）
+        │
+        └── 方式 B：transpose(TBN) × L_world → L_tangent
+                     （在切线空间做光照）
+        ↓
+       光照计算
+```
+
+### 九、记忆要点
+
+1. **TBN 三个轴 = u/v/法线** 三个方向
+2. **TBN 矩阵的作用 = 切线空间 ↔ 世界空间的转换桥梁**
+3. **法线贴图存的是切线空间法线**（大多蓝色调，因为 Z 朝外）
+4. **TBN 由三角形位置 + UV 坐标推导**，不是凭空来的
+5. **正交化**（Gram-Schmidt）防止数值漂移
+6. **handedness** 处理镜像 UV 的情况
+7. PBR/IBL 中通常用**方式 A（TBN→World）**，因为还要采样环境 cubemap
+
+### 十、工业标准
+MikkTSpace vs 标准数学推导对比
+
 # UVAtlas 库
 是对uv展开中的基于信号处理的自动化展开算法的一个经典实现
 open3d 也有一个实现compute_uvatlas
