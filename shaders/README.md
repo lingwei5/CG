@@ -244,3 +244,272 @@
 | 边缘高亮 | edge_highlight.glsl | Sobel + Fresnel |
 | 交界高亮 | intersection_highlight.glsl | 深度差 + SDF |
 | 体积光 | god_rays.glsl | 径向模糊 + 相位函数 |
+
+
+# PBRT PBR 展示 Shader 分析
+
+> 来源：ShaderToy 上的交互式 PBR 教学工具，使用 GLSL 实现完整的基于物理的渲染流程，并支持实时交互调节参数查看各项 BRDF 分量。
+
+## 一、整体架构
+
+采用 ShaderToy 经典的**双通道结构**：
+
+| 通道 | 文件 | 职责 |
+|------|------|------|
+| **Buffer A** | [pbr_show_BufferA.glsl](./pbr_show_BufferA.glsl) | 控制通道：处理鼠标输入、维护 UI 状态（菜单/滑块/旋转），把状态写入纹理像素 |
+| **Image** | [pbr_show_Image.glsl](./pbr_show_Image.glsl) | 渲染通道：读取状态、SDF 光线步进、PBR 光照、UI 绘制 |
+
+两者通过 `iChannel0`（Buffer A 的输出纹理）传递状态，使用 `texelFetch(iChannel0, ivec2(x,y), 0)` 在固定像素位置读写状态。
+
+## 二、状态管理（Buffer A）
+
+[pbr_show_BufferA.glsl#L84-L140](./pbr_show_BufferA.glsl#L84-L140) 中的 `mainImage`：
+
+- **仅在左上角 8×8 像素区域写入状态**（`fragCoord.x >= 8. || fragCoord.y >= 8.` 时 `discard`），把整张纹理的左上角当作"寄存器"使用。
+- `AppState` 结构包含 7 个 float：menuId / metal / roughness / baseColor / focus / focusObjRot / objRot。
+- 通过 `StoreValue(vec2(0,0), ...)` 和 `StoreValue(vec2(1,0), ...)` 把状态写到 (0,0) 和 (1,0) 两个像素中（每像素 vec4 = 4 个 float）。
+- 鼠标交互判定：滑块、颜色选择、金属/非金属切换、物体拖拽旋转。
+- `iFrame >= 1 ? ret : vec4(0.)` 保证第一帧初始化为默认状态。
+
+## 三、场景建模（SDF）
+
+[pbr_show_Image.glsl#L376-L419](./pbr_show_Image.glsl#L376-L419) 使用符号距离函数（SDF）建模一个抽象雕像：
+
+```
+Scene(p) = Union(ring, body)
+  ring = Disc - Cylinder - Box(旋转45°切口) + Disc装饰
+  body = Sphere - Sphere(前凹) - Sphere(后凹) - Box(横向切割) + Sphere(主体)
+```
+
+- 使用 CSG 运算：`Substract`（差集）、`Union`（并集）、`SubstractRound`（圆角差集）。
+- `localToWorld` 矩阵由 `rotY * rotZ` 组成，支持物体随鼠标横向拖拽旋转 + 自动 Y 轴自转。
+- `CastRay` 采用 50 步光线步进，`SceneNormal` 用中心差分估法线，`SceneAO` 用 6 段步进估环境光遮蔽。
+
+## 四、PBR 核心实现
+
+这是整个 shader 的精华，[pbr_show_Image.glsl#L626-L688](./pbr_show_Image.glsl#L626-L688) 实现了完整的 **Cook-Torrance BRDF**：
+
+### 1. 参数准备
+
+```glsl
+vec3 baseColor    = pow(BASE_COLORS[...], vec3(2.2));   // sRGB → 线性
+vec3 diffuseColor = s.metal==1. ? vec3(0.) : baseColor; // 金属无漫反射
+vec3 specularColor= s.metal==1. ? baseColor : vec3(0.02); // 非金属 F0=0.02
+float roughnessE  = s.roughness * s.roughness;          // Disney 映射
+float roughnessL  = max(.01, roughnessE);               // 光照项使用
+```
+
+### 2. Cook-Torrance 三大项
+
+[pbr_show_Image.glsl#L308-L331](./pbr_show_Image.glsl#L308-L331)：
+
+| 项 | 函数 | 公式 |
+|----|------|------|
+| **D 法线分布 (GGX)** | `DistributionTerm` | `r² / [π·((N·H)²·(r²-1)+1)²]` |
+| **G 几何遮蔽 (Smith GGX)** | `VisibilityTerm` | `0.5 / [N·L·√((N·V)²-(N·V)²r²+r²) + N·V·√((N·L)²-(N·L)²r²+r²)]` |
+| **F 菲涅尔 (Schlick)** | `FresnelTerm` | `F0 + (1-F0)·(1-V·H)⁵` |
+
+注意 `VisibilityTerm` 返回的是 **G/(4·N·V·N·L)** 形式（即 V = G/(4 NdotV NdotL)），所以最终镜面反射项为：
+
+```glsl
+specular += lightColor * F * (D * V * π * NdotL);
+```
+
+其中 `π` 用于平衡 D 项里的 `1/π`，最终符合能量守恒。
+
+### 3. 环境光照（IBL）
+
+[pbr_show_Image.glsl#L649-L655](./pbr_show_Image.glsl#L649-L655) 实现了**近似 IBL（Image-Based Lighting）**：
+
+```glsl
+vec3 env1 = EnvRemap(texture(iChannel2, refl).xyz);  // 高分辨率环境贴图（光滑）
+vec3 env2 = EnvRemap(texture(iChannel1, refl).xyz);  // 低分辨率环境贴图（粗糙）
+vec3 env3 = EnvRemap(SHIrradiance(refl));            // 球谐近似（超粗糙）
+vec3 env  = mix(env1, env2, roughnessE*4.);          // 粗糙度混合
+env       = mix(env, env3, (roughnessE-0.25)/0.75);  // 极粗糙切到 SH
+```
+
+- 用两张贴图 + 球谐三档混合近似 prefiltered environment map。
+- `EnvBRDFApprox`（[pbr_show_Image.glsl#L602-L612](./pbr_show_Image.glsl#L602-L612)）采用 Unreal Engine 4 移动端方案近似 BRDF LUT，输出 `(scale, bias)` 给 `specularColor * AB.x + AB.y`。
+- 球谐系数 `SH_STPETER`（[pbr_show_Image.glsl#L541-L553](./pbr_show_Image.glsl#L541-L553)）取自圣彼得大教堂的真实光照探测数据，参考 iq 的 [lt2GRD](https://www.shadertoy.com/view/lt2GRD)。
+
+### 4. 最终合成
+
+```glsl
+diffuse  *= ao;
+specular *= saturate(pow(ndotv+ao, roughnessE) - 1. + ao);  // AO 衰减 specular
+color = diffuse + specular;
+color = pow(color * .4, vec3(1./2.2));                       // 曝光 + 线性→sRGB
+```
+
+## 五、可视化模式（教学亮点）
+
+[pbr_show_Image.glsl#L672-L686](./pbr_show_Image.glsl#L672-L686) 通过 `menuId` 切换显示不同分量，是核心教学功能：
+
+| menuId | 显示内容 | 对应章节 |
+|--------|---------|---------|
+| `MENU_SURFACE` (0) | 完整 PBR 结果 | — |
+| `MENU_DIFFUSE` (6) | 仅漫反射项 | 漫反射 |
+| `MENU_SPECULAR` (7) | 仅镜面项 | 高光 |
+| `MENU_DISTR` (8) | D 项（法线分布） | NDF |
+| `MENU_FRESNEL` (9) | F 项（菲涅尔/envBRDF approx） | Fresnel |
+| `MENU_GEOMETRY` (10) | G 项（乘以 4·NdotV·NdotL 还原原始 G） | Geometry |
+
+这种"逐项可视化"是该 shader 最大的教学价值，可直接对应 PBRT 第 8 章 BRDF 模型。
+
+## 六、UI 绘制
+
+[pbr_show_Image.glsl#L115-L260](./pbr_show_Image.glsl#L115-L260) 在 shader 内手绘了完整 UI：
+
+- **SDF 文字**：`TextSDF` 从 `iChannel3` 字体纹理采样，按字符索引切分（16×16 字符网格）。
+- **2D 图示**：`Diagram` 用 `Arrow`/`Capsule`/`Rectangle` SDF 画出反射/折射/入射光示意。
+- **位图文字编码**：[pbr_show_Image.glsl#L691-L764](./pbr_show_Image.glsl#L691-L764) 把每个英文单词编码成 `uint`（4 字符 = 1 个 uint），按小端字节序还原字符，用 `uint(v)` 解码——这是 ShaderToy 上常见的"无纹理文字"技巧。
+
+## 七、技术亮点总结
+
+1. **完整 Cook-Torrance BRDF**：D/G/F 三项均按 GGX + Schlick + Smith 实现，参数取值符合 Disney PBR 规范。
+2. **近似 IBL**：双贴图 + 球谐三档混合代替 prefiltered map + BRDF LUT，移动端友好。
+3. **SDF 建模 + 光线步进**：纯片元 shader 实现 3D 物体，无顶点数据。
+4. **逐项可视化**：把 BRDF 各分量分离显示，是学习 PBR 公式最直观的方式。
+5. **状态机 UI**：用 Buffer A 维护交互状态，纯 shader 实现可点击菜单/滑块/拖拽。
+6. **数学一致性**：Disney roughness 映射（`r² = roughness²`）、能量守恒、Gamma 校正全部正确。
+
+---
+
+## 八、可继续深入的部分
+
+下面列出本 shader 中涉及但未完全展开的若干技术点，可作为后续进一步学习的方向。每一项均给出关键问题、参考代码位置和延伸资料。
+
+### 1. SDF 建模与 CSG 运算细节
+
+- **关键问题**
+  - `Substract`、`SubstractRound`、`UnionRound` 的数学推导与适用场景
+  - 为什么 `length(max(d, 0.0))` 可以构造正确的 SDF Box
+  - 平滑混合（smooth union / smin）的 `k` 参数对几何形状的影响
+- **代码位置**：[pbr_show_Image.glsl#L284-L376](./pbr_show_Image.glsl#L284-L376)
+- **延伸资料**：Inigo Quilez 的 [distance functions](https://iquilezles.org/articles/distfunctions/) 与 [smooth combinations](https://iquilezles.org/articles/smin/)。
+
+### 2. Raymarching 步进与法线估计
+
+- **关键问题**
+  - 50 步迭代是否足够？如何根据场景自适应步长（sphere tracing 加速）
+  - 中心差分法线估计的 epsilon 取值策略
+  - `SceneAO` 中 `s *= 0.4` 的衰减系数依据
+- **代码位置**：[pbr_show_Image.glsl#L421-L475](./pbr_show_Image.glsl#L421-L475)
+- **延伸资料**：PBRT 第 3.7 节（Acceleration Structures）与 Hart 的 sphere tracing 原始论文。
+
+### 3. GGX / Trowbridge-Reitz 分布推导
+
+- **关键问题**
+  - GGX 的长尾特性为什么比 Beckmann 更接近真实材质
+  - D 项中 `(N·H)²·(r²-1)+1` 这一项的几何含义
+  - Disney 的 `roughness²` 重映射为什么能更好控制视觉感受
+- **代码位置**：`DistributionTerm` [pbr_show_Image.glsl#L317-L322](./pbr_show_Image.glsl#L317-L322)
+- **延伸资料**：PBRT 第 8.4.3 节、Walter et al. 2007 *Microfacet Models for Refraction*、[Disney 2012 course notes](https://blog.selfshadow.com/publications/s2012-shading-course/)。
+
+### 4. Smith 几何函数与高度相关遮蔽
+
+- **关键问题**
+  - `VisibilityTerm` 为何等价于 `G / (4·N·V·N·L)`
+  - Smith Joint GGX 与分离 G1/G2 的差异
+  - 高度相关（height-correlated）G2 的改进公式
+- **代码位置**：`VisibilityTerm` [pbr_show_Image.glsl#L309-L315](./pbr_show_Image.glsl#L309-L315)
+- **延伸资料**：Heitz 2014 *Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs*。
+
+### 5. Schlick Fresnel 与导体/介质区别
+
+- **关键问题**
+  - 金属的 F0 与非金属 F0=0.04 (≈4%) 的物理来源
+  - Schlick 近似在掠射角的误差
+  - 色散菲涅尔（conductors 的复折射率）实现
+- **代码位置**：`FresnelTerm` [pbr_show_Image.glsl#L324-L328](./pbr_show_Image.glsl#L324-L328)
+- **延伸资料**：PBRT 第 8.2 节 Fresnel Equations。
+
+### 6. IBL 近似与 prefiltered environment map
+
+- **关键问题**
+  - 用两张不同 mip 的环境贴图混合代替预过滤贴图的代价与限制
+  - `EnvRemap` 中的 `pow(2*c, 2.2)` 是什么作用（HDR 与 gamma）
+  - 粗糙度切到 SH 的过渡阈值 0.25 是如何决定的
+- **代码位置**：[pbr_show_Image.glsl#L614-L655](./pbr_show_Image.glsl#L614-L655)
+- **延伸资料**：Karis 2013 *Real Shading in Unreal Engine 4*（[SIGGRAPH course](https://blog.selfshadow.com/publications/s2013-shading-course/)）。
+
+### 7. EnvBRDFApprox 的近似推导
+
+- **关键问题**
+  - UE4 的 BRDF LUT 2D 拟合多项式如何得到
+  - `c0`、`c1` 这些 magic number 的来源
+  - 不同 roughness / NdotV 下的拟合误差
+- **代码位置**：`EnvBRDFApprox` [pbr_show_Image.glsl#L602-L612](./pbr_show_Image.glsl#L602-L612)
+- **延伸资料**：[UE4 mobile PBR blog](https://www.unrealengine.com/en-US/blog/physically-based-shading-on-mobile)、[LazyProgrammer 的拟合分析](https://blog.lazyrobot.me/post/ue4-ibl-approx)。
+
+### 8. 球谐光照（Spherical Harmonics）
+
+- **关键问题**
+  - 9 个 SH 系数为什么对应 L0/L1/L2 三层
+  - `SHIrradiance` 中 c1~c5 这些常数的推导
+  - 旋转 SH 系数的高效方法（用于动态环境）
+- **代码位置**：`SH_STPETER` 与 `SHIrradiance` [pbr_show_Image.glsl#L486-L537](./pbr_show_Image.glsl#L486-L537)
+- **延伸资料**：Sloan 2008 *Stupid Spherical Harmonics (SH) Tricks*、Ramamoorthi 2001 *Precomputed Radiance Transfer*。
+
+### 9. 状态机 UI 与纹理寄存器模式
+
+- **关键问题**
+  - 为什么用 8×8 像素的左上角做"寄存器"
+  - `StoreValue` 的逐像素写入为何不会与其他像素冲突
+  - 鼠标点击→拖拽状态切换的时序逻辑
+- **代码位置**：[pbr_show_BufferA.glsl#L52-L82](./pbr_show_BufferA.glsl#L52-L82)、[pbr_show_BufferA.glsl#L84-L140](./pbr_show_BufferA.glsl#L84-L140)
+- **延伸资料**：ShaderToy wiki 与 Shadertoy 入门教程 [Three.js 与 Shadertoy](https://threejs.org/manual/zh/shadertoy.html)。
+
+### 10. UI 文字编码（uint → 字符串）
+
+- **关键问题**
+  - 4 个 ASCII 字符如何打包成一个 `uint`
+  - 小端字节序在 GLSL 中如何还原
+  - 这种"硬编码文字"相对 `texture(font)` 的优缺点
+- **代码位置**：[pbr_show_Image.glsl#L691-L764](./pbr_show_Image.glsl#L691-L764)
+- **延伸资料**：Shadertoy 上的 [text rendering 教程](https://www.shadertoy.com/view/4sXfDs) 与 iq 的 font SDF 实现。
+
+### 11. 色彩空间与 Gamma 校正
+
+- **关键问题**
+  - 输入颜色 `pow(c, 2.2)` 与输出 `pow(c, 1/2.2)` 的完整管线
+  - 为什么环境贴图也需要 `EnvRemap`
+  - 线性空间 vs sRGB 空间混合时的常见错误
+- **代码位置**：[pbr_show_Image.glsl#L614-L617](./pbr_show_Image.glsl#L614-L617)、[pbr_show_Image.glsl#L683](./pbr_show_Image.glsl#L683)
+- **延伸资料**：PBRT 第 5.4.2 节 *Gamma*、[What every coder should know about gamma](https://blog.johnnovak.net/2016/09/21/what-every-coder-should-know-about-gamma/)。
+
+### 12. 能量守恒与 AO 衰减
+
+- **关键问题**
+  - `specular *= pow(ndotv+ao, roughnessE) - 1. + ao` 这一行的物理含义
+  - 为什么 specular 比 diffuse 更需要 AO 衰减
+  - GTAO / HBAO 等 SSAO 算法与简单球面 AO 的区别
+- **代码位置**：[pbr_show_Image.glsl#L678-L680](./pbr_show_Image.glsl#L678-L680)
+- **延伸资料**：Jimenez 2016 *Practical Real-Time Strategies for Accurate Indirect Occlusion*。
+
+### 13. 对应 PBRT 章节交叉阅读
+
+下表给出本 shader 各部分与 PBRT（第 3 版）的对应关系，便于结合理论阅读：
+
+| Shader 部分 | PBRT 章节 |
+|------------|-----------|
+| BRDF 模型 / Cook-Torrance | 第 8.1 ~ 8.4 节 |
+| Fresnel / Schlick | 第 8.2 节 |
+| GGX / Trowbridge-Reitz | 第 8.4.3 节 |
+| Smith 几何函数 | 第 8.4.2 节 |
+| 环境光与球谐 | 第 12.6 节 |
+| 光线步进 / Raymarching | 第 3.7 节（思想相近） |
+| 色彩空间 | 第 5.4.2 节 |
+
+### 14. 推荐的进阶实践
+
+1. **将本 shader 的 BRDF 项替换为 Multiple-Scattering GGX**（Heitz 2016），观察能量补偿后粗糙金属暗部变亮的差异。
+2. **加入 Clearcoat / Sheen 层**（Disney Principled BRDF 扩展），实现车漆或织物效果。
+3. **把 IBL 从"双贴图混合"升级为完整 prefiltered map + BRDF LUT**，对比性能与画质。
+4. **加入多光源与软阴影**，结合 SDF 距离场快速生成阴影。
+5. **接入 KHR_pbr_nextgen 规范**，对比本 shader 与工业级 PBR 实现的差异。
+
+---
+
+> 本 README 随学习进度持续更新，建议结合源代码与对应 PBRT 章节交叉阅读。
