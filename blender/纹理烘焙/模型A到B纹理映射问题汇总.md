@@ -31,7 +31,7 @@
 5. 切到 **Render Properties → Bake**：
    - Bake Type：**Diffuse**（或 Emit）
    - 勾选 **Selected to Active**
-   - 先选 A，再加选 B（最后选中的为目标）
+   - 先选 A，再加选 B（最后选中的为目标） 视口里加选 = Shift，大纲列表里加选 = Ctrl
 6. 点击 **Bake**，结果就是 A 的纹理按 B 的 UV 烘焙出来。
 
 B 拿到一张符合自身 UV 的图后，后续只要换不同图即可。
@@ -365,3 +365,153 @@ A 表面  ←─────  ←─  cage 壳表面
 
 1. 需要使用png, dds格式不大行, jpg不确定
 2. 模型应该尽量对齐，对的越齐越准
+
+
+# Blender 让两个相似模型 A、B 重合的方法
+
+直接选中模型，object属性的 location直接按住鼠标左键滑动 修改位置
+
+## 前提概念
+
+"重合"分两个层面：
+- **位置重合**：原点 (origin) 对齐到同一点
+- **几何重合**：所有顶点完全重合（需要位置 + 旋转 + 缩放都对齐）
+
+下面按场景选择方法。
+
+## 方法一：用复制替换法（最简单，几何完全重合）
+
+**适用场景**：你只想要 A 的位置，但用 B 的几何（或反过来）
+
+```
+1. 选中 B（要复制的源模型）
+2. Shift+D 复制，右键取消移动（保持原地）
+3. 选中复制出的 B'
+4. Shift 选中 A（目标位置参考）
+5. Ctrl+A → Apply All Transforms（应用 B' 的变换）
+6. Object → Align Objects（对齐工具）
+   或用下面方法
+```
+
+更彻底的做法——**用 A 的位置覆盖 B**：
+
+```
+1. 选中 B
+2. Shift 选中 A（A 成为活动对象，最后选中）
+3. Object → Align Objects（对齐物体）
+   - Align Mode: Location
+   - 选择 X/Y/Z 轴
+   - Relative To: Active Object（相对活动对象 A）
+```
+
+## 方法二：复制位置约束（非破坏性，可随时关）
+
+**适用场景**：想保留两个物体的独立性，只让 B 跟随 A 的位置
+
+```
+1. 选中 B
+2. Object Constraint Properties（物体约束属性面板，图标像链条）
+3. Add Object Constraint → Copy Location
+4. Target: 选 A
+5. B 立即跳到 A 的位置
+```
+
+如果连旋转/缩放也要对齐：
+- 再加 **Copy Rotation** 和 **Copy Scale** 约束
+- 或直接用 **Child Of** 约束（把 B 设为 A 的子物体）
+
+## 方法三：用 3D 游标精确对齐（手动定位）
+
+**适用场景**：想把 B 移到某个具体点（比如 A 的某个顶点）
+
+```
+1. 选中 A，进入编辑模式 (Tab)
+2. 选中某个顶点
+3. Shift+S → Cursor to Selected（游标到选中点）
+4. 回到物体模式 (Tab)
+5. 选中 B
+6. Shift+S → Selection to Cursor (Offset)（选中到游标，保留偏移）
+   或 Selection to Cursor（原点直接对齐到游标）
+7. Object → Set Origin → Origin to 3D Cursor（可选，让 B 的原点也到游标）
+```
+
+## 方法四：用父级关系对齐
+
+**适用场景**：B 应该跟随 A 的整体变换
+
+```
+1. 选中 B
+2. Shift 选中 A（A 最后选，是活动对象）
+3. Ctrl+P → Set Parent to Object (Keep Transform)
+   → B 成为 A 的子物体，保持当前世界位置
+4. 若要让 B 完全重合到 A：先做 Ctrl+A 应用 B 的变换，再设置父级
+```
+
+## 方法五：手动输入精确坐标
+
+**用e场景**：已知精确坐标值
+
+```
+1. 选中 A，按 N 打开侧边栏 Item 面板
+2. 记录 Location X/Y/Z 和 Rotation/Scale
+3. 选中 B
+4. 在 N 面板输入与 A 相同的 Location/Rotation/Scale
+5. （可选）Object → Apply → All Transforms，固化变换
+```
+
+## 方法六：镜像对齐（旋转/缩放也要对齐时）
+
+**适用场景**：A 和 B 朝向不同
+
+```
+1. 选中 B
+2. Shift 选中 A
+3. Object → Mirror（镜像）
+   - 或用对齐工具 Align Objects
+   - Align Mode: Location/Rotation/Scale
+   - Relative To: Active Object
+```
+
+## 最常用推荐流程
+
+### 场景 A：想让 B 完全叠在 A 上（保留 A 的位置）
+
+```
+1. 选中 B → Shift 选中 A（A 活动）
+2. N 面板 → Item → 查看 Location
+3. 把 B 的 Location 改成和 A 一样
+4. （可选）Ctrl+A → All Transforms 应用
+```
+
+### 场景 B：想让 B 永久成为 A 的一部分
+
+```
+1. 选中 B → Shift 选中 A
+2. Ctrl+J（Join，合并为一个物体）
+3. B 的几何并进 A，原点统一到 A
+```
+
+### 场景 C：B 和 A 几何相同但朝向不同，想对齐
+
+```
+1. 选中 B → Shift 选中 A
+3. Object → Align Objects（2.8+ 有此功能）
+   - Location: X Y Z 全选
+   - Rotation: X Y Z 全选
+   - Relative To: Active Object
+```
+
+## 常见坑
+
+| 现象 | 原因 | 解决 |
+|------|------|------|
+| 对齐后仍有偏差 | 原点位置不同（origin 不在几何中心） | Object → Set Origin → Origin to Geometry |
+| Join 后位置乱了 | B 的变换未应用 | Join 前 Ctrl+A → All Transforms |
+| Copy Location 后 B 形变 | B 有非均匀缩放 | 先 Ctrl+A → All Transforms |
+| Align Objects 没效果 | 活动对象选错了 | 活动对象 = 最后选中（橙色高亮） |
+
+## 一句话总结
+
+> **临时跟随用约束，永久重合用对齐工具，合并成一个用 Join，精确控制用 3D 游标或坐标输入。**
+
+告诉我你的具体场景（A/B 是否要保留独立、是位置对齐还是几何对齐、是否要旋转对齐），我可以给更精准的步骤。
