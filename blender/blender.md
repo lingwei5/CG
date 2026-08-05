@@ -83,6 +83,8 @@ snapping target
 
 ## 3D Viewport
 
+object mode模式下侧边栏item能够显示物体的长宽高尺寸
+
 ### navigation
 导航有很多模式
 1. 标准模式
@@ -363,6 +365,135 @@ unlink:当前数据不再被某个用户使用，引用计数-1
 材质右侧的x进行unlink
 shift+LMB+x:所有用户都不在使用此data-block,引用计数置零，删除data-block
 
+## Linked Libraries (关联库)
+链接库允许把一个 .blend 文件中的数据块引用到另一个 .blend 文件中，复用资产而不必复制。
+
+### 是什么
+- **链接库**是引用外部 .blend 文件中数据块的机制，在本地 .blend 文件中保存对外部文件的引用路径
+- 通过 `File → Link` 或 `File → Append` 操作实现
+- 在 Outliner 的 `Blender File` 显示模式下可以看到当前文件中所有链接的数据块及其来源路径
+- 链接的数据块在 Outliner 中以**链状图标**标识
+
+### 用途
+- **多人协作**：把通用资产（角色、道具、场景）放在库文件中，多人共享同一份源
+- **跨项目复用**：相同的资产可以被多个项目链接使用，避免重复制作
+- **保持数据一致**：更新库文件后，所有链接它的项目都能获取最新内容
+- **减小项目体积**：只存储引用，不复制数据本身
+- **模块化制作**：把场景拆分成多个库文件（背景、角色、特效等），按需链接
+
+### 内容
+- **Link（链接）**：在本地文件中创建对外部数据块的引用，外部源文件修改后本地会自动同步；默认情况下链接的数据块**不可编辑**（包括物体的位置/旋转/缩放都被锁定）
+- **Append（追加）**：把外部数据块**完整复制**到本地文件中，复制后与原文件完全独立；可在 `File Browser` 中浏览外部 .blend 文件并选择要追加的内容
+- **Options 选项**：
+  - `Relative Path`（链接）：用相对路径引用外部文件
+  - `Select`（链接/追加）：自动选中新添加的物体
+  - `Active Collection`（链接/追加）：添加到当前激活集合 vs 新建"Linked Data"/"Appended Data"集合
+  - `Instance Collections`（链接/追加）：以集合实例（Empty 物体）方式添加
+  - `Instance Object Data`（链接/追加）：为直接链接的物体数据创建物体
+  - `Fake User`（追加）：标记为 Protected，保存时不删除
+  - `Localize All`（追加）：连带复制所有间接链接的数据
+- **Reload Library**：在 Outliner 的 `Blender File` 视图右键点击链接的库文件，可重新加载以更新数据
+- **Relocate Library**：当外部文件移动或重命名后，可重新指定路径（解决 Broken Libraries 断链问题）
+- **Relocate Linked ID**：用同库或不同库中的另一个 ID 替换当前链接的 ID
+- **Make Local**：把链接的数据块转为本地（`Type` 选项决定是否连数据/材质一起本地化）
+- **Known Limitations 已知局限**：
+  - 不能有循环依赖
+  - 链接物体时场景级别的设置（如 Rigid Body World）不会被复制，需把整个 Scene 链接作为 Background Scene
+  - 引用压缩的 .blend 文件需完整加载，可能占用较多内存
+
+### Library Overrides (库重写)
+**是什么**：允许在保持与原始库数据同步的前提下，对链接数据块进行本地编辑的系统（Blender 3.0 引入，替代旧的 Proxy 代理系统）
+
+**用途**：
+- 对链接的角色/道具进行局部定制（位置、修改器、材质参数等），但保留与原始库文件的同步
+- 同一链接数据的多个独立覆盖（同一角色在同一场景中多次出现，每个可独立编辑）
+- 递归链接覆盖
+
+**核心概念 - 重写层级（Override Hierarchies）**：
+- 真实资产几乎不会由单个数据块组成，而是由多个相互依赖的数据块（物体+网格+骨架+材质+纹理）构成的树形结构
+- 层级根通常是直接链接的集合
+- 当同一链接数据有多个覆盖时，层级可清晰区分每个覆盖
+
+**操作**：
+- `Make an Override`（生成重写）：从选中数据块自动创建所需的所有重写
+- `Reset an Override`（重置重写）：恢复为原始链接值
+- `Clear an Override`（清空重写）：删除重写，回退到链接引用
+- `Edit an Override`（编辑重写）：像普通数据块一样编辑；属性被重写时会显示**蓝绿色**高亮
+- `Resyncing Overrides`（同步重写）：链接数据块之间的关系变化时需要重新同步；打开 .blend 时自动同步，也可手动
+
+**限制**：
+- Edit Mode 不允许对覆盖进行编辑
+- 重写 Action 数据块的 F-Curve 只能静音，不能编辑/添加
+- 库文件丢失时部分数据可能丢失（如 Pose 骨骼当 Armature obdata 本身未重写时）
+
+## Asset Libraries (资产库)
+**3.0 版本引入**，用于系统化管理可复用的 Blender 资产。
+
+### 是什么
+- **Asset（资产）**：带有元数据（含义、用途、目录、作者、标签、预览图）的数据块——`An asset is a data-block with meaning`
+- **Asset Library（资产库）**：在 Preferences 中注册的、包含 .blend 文件的目录
+- 数据块本身不一定是资产，只有通过 `Mark as Asset` 标记后才是；Asset 描述的是有"语义"的数据
+
+### 用途
+- **统一管理可复用资源**：把常用资产集中管理，避免散落各处
+- **团队共享资源库**：让多个成员使用同一套资产
+- **在线资产库**：Blender 支持在线资源库（按需下载并本地缓存），适合分发官方/工作室标准资产
+- **当前文件资产库**：每个 .blend 文件内置一个"Current File"资产库，方便单文件内管理
+
+### 内容
+- **注册位置**：`Edit → Preferences → File Paths → Asset Libraries`
+- **浏览方式**：通过 Asset Browser 编辑器选择已注册的资产库
+- **索引机制**：首次加载时扫描库中所有 .blend 文件并生成索引（存放在 Local Cache Directory），后续加载显著加快
+- **资产目录（Catalog）**：每个资产可分配目录标签，与文件物理位置无关
+- **Asset Types 资产类型**，分两类：
+  - **Primitive（原始）资产**：可被 Link 或 Append 到当前文件
+    | 资产 | 描述 |
+    |------|------|
+    | Material | 可应用到物体的材质数据块，拖到物体上会替换材质槽 |
+    | Collection | 物体集合，可被链接/追加到场景，保持内部层级，可被实例化 |
+    | Object | 物体资产（可包含 mesh/curve/light 等） |
+    | Node Group | 节点组资产，拖到兼容的节点编辑器（Geometry Nodes/Shader/Compositor） |
+    | World | 世界环境资产，定义全局环境光照 |
+    | Scene | 完整场景资产（含相机/灯光/链接物体） |
+  - **Preset（预设）资产**：被加载并**应用**或**激活**到某物
+    | 资产 | 描述 |
+    |------|------|
+    | Brush | 雕刻/绘制笔刷资产，激活后成为当前笔刷但不永久保存 |
+    | Pose Action | 姿势资产（基于 Action），应用到选中/激活骨架 |
+
+- **Bundled Assets 内置资产**：Blender 自带 "Essentials" 库，包括：
+  - Hair node groups
+  - Smooth By Angle Node Group
+  - Brushes：Mesh Sculpt / Curve Sculpt / Texture Paint / Vertex Paint / Weight Paint
+- **创建资产**：
+  - Primitive 资产：在 data-block 选择器、Outliner、3D 视口物体菜单中使用 `Mark as Asset`
+  - Preset 资产：使用专用的创建按钮（如 `Create Pose Asset`），或从已有笔刷资产 `Duplicate Asset`
+- **编辑资产**：作为常规数据块编辑；编辑完后需保存 .blend 文件以更新到资产库
+- **分享资产**：直接分享 .blend 文件；同时需带上 Asset Catalog Definition File
+- **使用资产**：从 Asset Browser 拖入场景
+- **删除资产**：用 `Clear Asset` 移除元数据（catalog/描述/作者/标签）
+- **Asset System Files (.asset.blend)**：Blender 对部分资产类型（当前只有 Brush）使用 `.asset.blend` 扩展名特殊管理——只包含单一资产及其依赖；可打开但不能直接保存（防止数据丢失）
+- **Online Asset Libraries 在线资产库**：
+  - 用 URL 而非目录路径标识
+  - 按需下载并缓存到本地
+  - 不能直接 Link，必须 Append 或 Pack
+  - 需要在 Preferences 中启用 Online Access
+- **设计局限**：
+  - Blender 不允许写入到当前打开文件之外的其他 .blend 文件——编辑资产必须打开其源文件
+  - 资产推送（Asset Pushing）：Blender 不会自动把资产推送到库中（如何处理材质/纹理/依赖的决策需手动或借助扩展工具）
+
+### 与 Linked Libraries 的关系
+- **资产系统建立在数据块和链接库系统之上**
+- Primitive 资产本质上就是"准备好被 Link/Append"的数据块
+- Asset Library 提供更友好的浏览和组织方式，而 Linked Library 提供底层的引用机制
+- Library Overrides 可应用于从资产库拖入的链接数据
+
+## 与其他概念的关系
+- **Data-Blocks** 是基础——所有内容都是数据块
+- **Linked Libraries** 是文件间的引用机制
+- **Library Overrides** 让链接数据可被本地编辑
+- **Asset Libraries** 是更高层的组织方式，让资产可被浏览、搜索、复用
+
 ~~# Add-ons~~  
 ~~# Advanced~~  
 ~~# Troubleshooting~~  
@@ -445,7 +576,6 @@ https://github.com/matyalatte/Blender-DDS-Addon
 
 # uv展开
 https://www.bilibili.com/video/BV114hgzYETE?vd_source=ffd47f490f976be9dd70c839d34b8fdc&spm_id_from=333.788.videopod.sections
-
 
 # TODO
 - [x] 导航时鼠标操作及小键盘快捷键
