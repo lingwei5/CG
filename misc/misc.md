@@ -8,7 +8,9 @@
 
 ## 几何处理库
 ### igl
-https://github.com/libigl/libigl 几何处理库 网格处理 参数化(纹理映射 uv展开) https://www.alecjacobson.com/weblog/4500.html 是一个uv编辑器
+https://github.com/libigl/libigl 几何处理库 网格处理 参数化(纹理映射 uv展开) 
+
+https://www.alecjacobson.com/weblog/4500.html 是一个基于igl库的uv编辑器
 
 ### assimp
 ```c++ 
@@ -1995,6 +1997,8 @@ lvgl
 nanovg:2d vector drawing based on opengl
 
 ImGUI:轻量 无状态 高性能 跨平台，适合游戏编辑器、调试界面以及CAD软件界面
+
+https://pthom.github.io/imgui_explorer/ gui的代码及功能联动演示程序
 
 **nanogui vs imgui**
 🔍 核心工作机制剖析
