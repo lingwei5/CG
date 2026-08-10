@@ -592,6 +592,7 @@ band->GetHistogram(panHistogram, 256, 0, 0, 0, 0, 0);  // 大多参数=0 走默�
 - `Dataset` 与 `Band` 是"容器—组件"关系（不是继承）
 - `Band` 自己又可以包含若干 `Overview`（降采样图块，4×、16×、64×）
 - `Band` 与 `Dataset` 都继承 `GDALMajorObject`，所以都可以查元数据、查错误
+- 每个band的类型只能是GDALDataType，而这个是8 16 32 64位的整型 浮点 复数，所以每个band只能是一个数，而不能是多个数放进一个band(特殊编码可以实现但不是gdal原始语义)
 
 ### 实际用途
 
