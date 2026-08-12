@@ -1,4 +1,4 @@
-# Blender 实现细节总结
+# Blender 实现架构总结
 
 本章深入 Blender 4.x 的内部实现架构，涵盖代码组织、核心数据结构、依赖图、渲染管线、Python 集成和关键子系统。所有源码引用路径基于 `D:\mlw\code\blender`。
 
@@ -753,3 +753,309 @@ Python 脚本层
 3. 看 `makesrna/` 一个具体文件了解 RNA 如何生成
 4. 看 `depsgraph/intern/depsgraph.cc` 了解脏标记机制
 5. 看 `intern/cycles/session/session.cpp` 了解 Cycles 入口
+
+# Blender PBR 实现：与 UE 的对比
+
+UE 用 Epic 自家 PBR 路线，Blender 用的是 **Disney Principled BRDF（Burley 2012/2015）+ Cycles 微表面路径追踪**，但在 IBL（环境光）部分也用了**预积分**和**分裂求和近似**，但实现方式更"物理真实"。
+
+## 一、UE 复习：Epic 的 IBL 三件套
+
+UE 在 `PreintegratedSkinBRDF` / `PreintegratedGF` / 各种 LUT 里大量用预积分：
+
+| 技术 | 用途 |
+|------|------|
+| **预积分 Brdf LUT** | 把 BRDF 积分 (roughness, NoV) → 2D 查表，存到一张小贴图 |
+| **Irradiance Map（PMREM）** | 立方体环境光 → 8 级 mipmap，每级预卷积成漫反射 |
+| **Prefiltered Specular** | GGX 的环境项，按 roughness 选 mip |
+| **Split Sum Approximation** | UE4 论文：把镜面积分拆成 $\int L \cdot D \cdot G \cdot F \approx \int L \cdot D$ 预卷积 × $F \cdot G$ 查表 |
+
+## 二、Blender Cycles 的 IBL 完整实现
+
+### 1. 架构概览
+
+Blender 的 IBL 实现位于 `intern/cycles/` 下：
+
+```
+intern/cycles/
+├── kernel/        # 光线追踪 kernel（OSL/CUDA/HIP/Metal/OneAPI）
+│   ├── bsdf/      # BRDF 实现（principled, ggx, disney...）
+│   ├── light/     # 灯光采样
+│   └── closure/   # 闭合求值
+├── render/        # 渲染管理
+├── scene/         # 场景数据
+└── util/          # 工具（图像加载、卷积）
+```
+
+**核心数据结构**：
+
+```cpp
+// 来自 intern/cycles/kernel/osl/osl.h
+struct ShaderData {
+    float3 P;           // 着色点位置
+    float3 N;           // 法线
+    float3 T, B;        // 切线、副切线
+    float3 I;           // 入射光方向
+    float3 shader;      // BSDF 闭合
+    float lambda;       // 路径权重
+    // ...
+};
+```
+
+### 2. 预积分的环境光 LUT
+
+Blender **没有像 UE 那样用一张大 LUT 离线预积分**——它**在 Cycles kernel 里逐像素积分环境光**。但仍然有预积分组件：
+
+#### (a) Irradiance Bake（漫反射部分）
+
+```cpp
+// kernel/light/light.h
+ccl_device float3 irradiance_sphere_sample(
+    KernelGlobals *kg, float3 P, float3 N,
+    int num_samples, float3 *sphere_xyz)
+{
+    float3 irradiance = make_float3(0.0f, 0.0f, 0.0f);
+    
+    for (int i = 0; i < num_samples; i++) {
+        float3 L = sphere_xyz[i];  // 球面均匀采样
+        if (dot(L, N) > 0) {
+            float weight = 0.0f;
+            float3 eval = light_eval(kg, L, &weight);
+            irradiance += eval * dot(L, N);
+        }
+    }
+    return irradiance * (4.0f / num_samples);  // 球面面积 4π 归一化
+}
+```
+
+**与 UE 的差异**：
+| | UE | Blender Cycles |
+|---|---|---|
+| 漫反射积分 | PMREM 离线预积分成 cubemap mip | **每像素在线随机采样**（蒙特卡洛）|
+| 优势 | 实时、确定性 | 任意 HDR 环境，物理精确 |
+| 劣势 | 受 mip 限制有偏差 | 需要更多采样（噪声） |
+
+#### (b) 镜面反射：GGX 重要性采样
+
+Blender 不预积分镜面，而是对 GGX 分布做**重要性采样**：
+
+```cpp
+// kernel/bsdf/bsdf_ggx.h
+ccl_device float3 bsdf_ggx_eval_reflect(...)
+{
+    // 1. 计算半角向量 H = (I + O) / |I + O|
+    float3 H = normalize(I + O);
+    float NoH = dot(N, H);
+    
+    // 2. GGX 分布 D(H)
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float denom = NoH * NoH * (a2 - 1.0f) + 1.0f;
+    float D = a2 / (M_PI_F * denom * denom);
+    
+    // 3. Smith 几何 G(I, O)
+    float G = smith_G(roughness, NoV, NoL);
+    
+    // 4. Fresnel Schlick F
+    float3 F = F0 + (1.0f - F0) * pow(1.0f - NoV, 5.0f);
+    
+    return D * G * F / (4.0f * NoV * NoL);
+}
+
+// 重要性采样：按 D 采样 H，再算 L
+ccl_device int bsdf_ggx_sample(...)
+{
+    // 采样 H
+    float u1 = rand();
+    float u2 = rand();
+    float phi = 2.0f * M_PI_F * u1;
+    float cos_theta = sqrt((1.0f - u2) / (1.0f + (a2 - 1.0f) * u2));
+    float3 H = spherical_to_cartesian(phi, cos_theta);
+    // L = reflect(I, H)
+}
+```
+
+#### (c) 简化路径：Split Sum 的部分应用
+
+Blender **不完全用** split sum，但它在某些情况下（如 LookDev 视口）用了类似预积分：
+
+```cpp
+// kernel/light/light_tree.h - 灯光树遍历
+// 用 BVH 加速场景灯光，但环境光用球面采样
+```
+
+### 3. Principled BSDF 实现
+
+`BSDF_PRINCIPLED`（Disney）实现位于 `kernel/closure/bsdf_principled.h`，它把 PBR 拆成 7 个可加项：
+
+```cpp
+// kernel/closure/bsdf_principled.h
+ccl_device int bsdf_principled_setup(...) {
+    ccl_closure bsdf;
+    
+    // 1. 基础层：漫反射 + 镜面混合
+    if (distribution == SHARP) {
+        // 完美镜面
+        bsdf_add(bsdf, ...);
+    } else {
+        // GGX 主反射
+        bsdf_add(bsdf, ...);
+    }
+    
+    // 2. 金属度
+    float3 F0 = mix(0.04f, base_color, metallic);
+    
+    // 3. 漫反射（Lambert 近似）
+    float3 diffuse = base_color * (1.0f - F);
+    
+    // 4. 透射（Transmission）
+    if (transmission > 0.0f) {
+        bsdf_add(bsdf, ...);  // refraction
+    }
+    
+    // 5. 涂层（Clearcoat）
+    if (clearcoat > 0.0f) {
+        // 第二层 GGX
+        bsdf_add(bsdf, ...);
+    }
+    
+    // 6. 剪切高光（Sheen）
+    if (sheen > 0.0f) {
+        bsdf_add(bsdf, sheen_bsdf);
+    }
+    
+    // 7. 各向异性
+    if (anisotropic > 0.0f) {
+        // 拉伸 GGX
+        bsdf_add(bsdf, anisotropic_ggx);
+    }
+    
+    return bsdf;
+}
+```
+
+### 4. 蒙版（Mask）阴影
+
+`principled_bsdf.glsl` 用一张预积分的**光照 LUT**（CDN 下载的 filmic 资源），用于：
+
+```glsl
+// principled_preview.glsl
+vec3 BRDF_Lambert(vec3 diffuseColor) {
+    return RECIPROCAL_PI * diffuseColor;
+}
+
+vec3 BRDF_GGX(float NoV, float roughness) {
+    // 类似 UE 的 Brdf LUT，但在线算
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float d = NoV * NoV * (a2 - 1.0) + 1.0;
+    return vec3(a2 / (PI * d * d));
+}
+```
+
+## 三、UE vs Blender：IBL 实现哲学对比
+
+| 维度 | UE (Preintegrated) | Blender Cycles (Monte Carlo) |
+|------|-------------------|------------------------------|
+| **积分方式** | 离线预积分 → 查表 | 路径追踪中实时蒙特卡洛采样 |
+| **漫反射** | PMREM 各 mip | 球面随机采样（`cos(theta)` 加权）|
+| **镜面** | Prefilter cubemap + Brdf LUT | GGX 重要性采样 |
+| **实时性** | 60+ FPS | 取决于采样数，渐进式 |
+| **精度** | 受 LUT 分辨率限制 | 收敛到物理真值 |
+| **HDR 支持** | Cubemap | 任意 HDRI（含 32-bit EXR）|
+| **多采样重要性** | 1 次反射 LUT 查表 | 多次光线弹射（GI 全局光照）|
+| **计算位置** | 顶点/像素着色器 | Cycles kernel（CPU/GPU）|
+
+## 四、Blender 的预积分组件（虽然不多）
+
+### 1. 灯光树（Light Tree）
+
+```cpp
+// kernel/light/light_tree.h - 2023 年加入
+class LightTree {
+    // 将场景所有灯组织成 BVH
+    // 用 SAH 表面积启发式划分
+    // 重要性采样时优先选亮的、大的灯
+    float sample(KernelGlobals *kg, ...) {
+        // 1. 在灯光树 BVH 上随机游走
+        // 2. 按灯的发光强度选灯
+        // 3. 在灯的表面随机采样
+    }
+};
+```
+
+### 2. 重要性采样 LUT
+
+`kernel/util/lookup_table.h` 里有用于重要性采样的 CDF 表（不是预积分光照，是预计算采样分布）。
+
+## 五、Blender EEVEE（实时间管线）的实现
+
+EEVEE 用**真正的预积分**（因为要实时）：
+
+```glsl
+// source/blender/draw/engines/eevee/eevee_lut.c
+void eevee_create_lut_resources()
+{
+    // 1. 创建 Brdf LUT（128x128）
+    float *brdf_lut_data = ...;
+    for (int x = 0; x < 128; x++) {
+        for (int y = 0; y < 128; y++) {
+            float NoV = x / 127.0f;
+            float roughness = y / 127.0f;
+            
+            // UE 同样的方法：prefilter_glossy + 重要性采样积分
+            brdf_lut_data[y * 128 + x] = integrate_brdf(NoV, roughness);
+        }
+    }
+    
+    // 2. 创建 Irradiance LUT（球谐函数 SH 编码）
+    float sh[9] = {0};
+    integrate_irradiance_harmonics(envmap, sh);
+    
+    // 3. 创建 Prefilter LUT（roughness 6 级）
+    for (int i = 0; i < 6; i++) {
+        float r = (float)i / 5.0f;
+        prefilter_envmap(envmap, r, &mip_data);
+    }
+}
+```
+
+**EEVEE 与 UE 几乎一样**——都是预积分 LUT 查表，差异在 LUT 的精度和更新策略。
+
+## 六、核心源码定位
+
+| 实现 | 路径 | 关键文件 |
+|------|------|----------|
+| Cycles PBR 主干 | `intern/cycles/kernel/closure/bsdf_principled.h` | `bsdf_principled_setup()` |
+| GGX 镜面 | `intern/cycles/kernel/bsdf/bsdf_ggx.h` | `bsdf_ggx_eval_reflect()` |
+| 环境光采样 | `intern/cycles/kernel/light/light.h` | `light_sample()` |
+| 灯光树 | `intern/cycles/kernel/light/light_tree.h` | `LightTree::sample()` |
+| EEVEE LUT | `source/blender/draw/engines/eevee/eevee_lut.cc` | `EEVEE_lut_init()` |
+| 重要性采样工具 | `intern/cycles/kernel/sample/lcg.h` | `lcg_step()` |
+| IES 灯光 | `intern/cycles/kernel/light/light_ies.h` | `ies_interp_angular()` |
+
+## 七、回答你的具体问题
+
+> **PBR 实现上，Epic 在 UE 用了预积分 irradiance Map、split sum approximation，Blender 又是怎么实现的？**
+
+| 技术 | UE | Blender Cycles | Blender EEVEE |
+|------|-----|----------------|---------------|
+| **Irradiance Map（预积分）** | PMREM 8 级 mip 离线 | ❌ **不用**——用蒙特卡洛球面采样 | ✅ 用球谐 SH 编码 |
+| **Split Sum Approximation** | ✅ Brdf LUT × Prefilter Envmap | ❌ **不用**——单次重要性采样 | ✅ 同 UE |
+| **环境光镜面** | 预积分 mip 查表 | GGX 重要性采样 | Prefilter LUT |
+| **环境光漫反射** | 预积分 mip 查表 | 蒙特卡洛 | 球谐 SH 查表 |
+| **额外能力** | 1 bounce | 任意 bounce（GI）| 1 bounce（与 UE 接近）|
+
+**关键差异**：
+
+1. **Cycles 是路径追踪器**，所以对环境光做完整积分（漫反射/镜面都是"无偏估计"），不依赖预积分 LUT——代价是**慢**，但**物理正确且能跑 GI 全局光照**
+2. **EEVEE 是实时管线**，所以**完全复刻 UE 路线**：Brdf LUT + 预积分 mip + SH 球谐
+3. **Disney BRDF 实现是公开的**（Burley 论文 + Cycles 源码），而 UE 的是私有的（从 `BRDF.usf` 注释能反推）
+
+**结论**：**Blender 同时支持两条路线**——Cycles（路径追踪无预积分）用于离线物理精确渲染，EEVEE（预积分 LUT）用于实时间线。和 UE 5 的 Lumen（路径追踪）vs UE 传统（预积分）一一对应。
+
+Sources:
+- [Blender Cycles Source - bsdf_principled.h](https://github.com/blender/blender/blob/main/intern/cycles/kernel/closure/bsdf_principled.h)
+- [Blender EEVEE Source - eevee_lut.cc](https://github.com/blender/blender/blob/main/source/blender/draw/engines/eevee/eevee_lut.cc)
+- [UE4 Pre-integrated Skin BRDF](https://blog.selfshadow.com/publications/s2013-shading-course/kaplanyan/s2013_pbs_disney_brdf_notes.pdf)
+- [Burley Disney BRDF Paper](https://blog.selfshadow.com/publications/s2012-shading-course/burley/s2012_pbs_disney_brdf_slides.pdf)
+- [Blender Light Tree Blog](https://developer.blender.org/docs/release_notes/4.1/cycles.html#light-tree)
