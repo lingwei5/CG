@@ -458,3 +458,90 @@ command: python -c "
 import OpenEXR, Imath
 import numpy as np
 import os, glob
+
+# 高模 → 低模 Albedo Bake 的数学本质
+
+先纠正一个常见误解：**Albedo 的烘焙其实没有法线贴图那么复杂的数学变换**。它本质上是一次**从低模 UV 空间到高模表面的逆向查询 + 颜色采样**，核心是一道**射线相交（ray-triangle intersection）问题**。
+
+![alt text](烘焙的数学原理.png)  蓝色的对应Cage，绿色的对应高模，黑色的对应低模，灰色的箭头是烘焙时候“射线”的示意
+
+## 整体流程的数学表述
+
+烘焙器（如 Marmoset、Substance、Blender 的 Bake）对低模的每一张纹理做如下操作：
+
+**第 1 步：遍历低模的每个纹素（texel）**
+
+低模上每个 texel 的坐标 $(u,v)$ 通过 UV 展开的逆映射，对应到低模三维空间中的一个表面点：
+
+$$P_{low}(u,v) = \text{UVtoWorld}(u,v)$$
+
+同时拿到该点处的低模表面法线 $N_{low}$。
+
+**第 2 步：沿法线方向发射射线**
+
+从 $P_{low}$ 出发，沿 $N_{low}$（或略微偏移后的方向）射出一条射线：
+
+$$R(t) = P_{low} + t \cdot N_{low}, \quad t \in [0, t_{max}]$$
+
+**第 3 步：射线与高模求交**
+
+对高模的所有三角形做相交测试（通常用 BVH 加速），找到最近的命中交点 $P_{hit}$ 和对应的三角形图元。
+
+**第 4 步：在三角形内插值得到 Albedo**
+
+命中三角形由三个顶点 $\{V_0, V_1, V_2\}$ 组成，每个顶点携带 UV 和高模材质颜色 $\{C_0, C_1, C_2\}$。用交点的重心坐标 $(\alpha, \beta, \gamma)$（满足 $\alpha+\beta+\gamma=1$）做插值：
+
+$$C_{hit} = \alpha C_0 + \beta C_1 + \gamma C_2$$
+
+这一步就是标准的**重心坐标插值**：
+
+$$\alpha = \frac{(P_{hit}-V_1) \times (V_2-V_1)}{(V_0-V_1) \times (V_2-V_1)} \quad \text{等}$$
+
+**第 5 步：写入低模纹理**
+
+将 $C_{hit}$ 写入低模纹理的 $(u,v)$ 位置。
+
+遍历完所有 texel，就得到了低模的 Albedo 贴图。
+
+## 关键细节
+
+### 📌 Cage / 偏移距离
+为了避免自交，射线起点通常不是 $P_{low}$ 本身，而是沿法线外推一段距离：
+
+$$P_{start} = P_{low} + N_{low} \cdot d_{cage}$$
+
+$d_{cage}$ 就是烘焙软件里的 "Cage distance" 参数。
+
+### 📌 平均法线 vs 光滑法线
+如果低模用的是平滑法线，$N_{low}$ 是顶点法线的插值结果；如果用硬边法线，则是面法线。这会影响射线方向，从而影响颜色采集的位置。
+
+### 📌 与 Normal Map 烘焙的区别
+| 项目 | Albedo Bake | Normal Map Bake |
+|---|---|---|
+| 数学核心 | 射线求交 + 颜色插值 | 射线求交 + **切线空间变换** |
+| 输出 | 直接拷贝颜色 $C_{hit}$ | 将高模法线 $N_{high}$ 转换到切线空间：$N_{tangent} = T^{-1} N_{high}$ |
+| 复杂度 | 低 | 高（涉及 TBN 矩阵） |
+
+Normal map 烘焙时，命中点的世界法线还要左乘切线空间基向量的逆矩阵，转换到 $[0,1]$ 的 RGB 编码——这才是真正"数学密集"的部分。而 **Albedo 烘焙只是"取色"，没有空间变换**。
+
+## 一个直觉化的比喻
+
+把低模想象成一个**空的纸盒（只有 UV 坐标网格）**，高模是**外面雕满花纹的雕塑**。烘焙 Albedo 的过程就是：从纸盒每个格子出发射一根针，扎到雕塑表面，把扎到的那点的颜色涂回格子里。针的角度由纸盒该点的法线决定，扎到的位置决定了取到什么颜色。
+
+---
+
+所以严格来说，**Albedo 烘焙的"数学原理"就是射线-三角形相交 + 重心坐标插值**，本身并不复杂。真正有深意的是**法线烘焙里的切线空间变换**——如果你感兴趣，我可以接着展开那部分的 TBN 矩阵推导。
+
+
+# blender里的实现
+首先，blender文档里关于cage, cage extrusion, max ray distance的相互描述是错误的
+4.5实测的结果如下：
+1. cage勾选不勾选不影响cage extrusion和max ray distance，看起来只是提供了一个可以指定cage模型的接口
+2. cage extrusion和max ray distance不是相互排斥的
+3. max ray distance 0.0代表不限制光线长度，效果会好(可能跟数据也有关系)，但耗时大
+4. 两个值都是blender unit(m)，绝对值，不是比例
+
+Bake shading on the surface of selected objects to the active object. The rays are cast from the low-poly object inwards towards the high-poly object. If the high-poly object is not entirely involved by the low-poly object, you can tweak the rays start point with Max Ray Distance or Extrusion (depending on whether or not you are using cage). For even more control you can use a Cage Object.
+
+blender里是要求低模包裹高模的，
+所谓的法线方向，其实包含外法线和内法线，这里使用内法线
