@@ -6,6 +6,9 @@
 2. [FastBVH](https://github.com/brandonpelfrey/Fast-BVH) 
 3. [PBR-Viewer](https://github.com/comfyui-wiki/PBR-Viewer)
 
+## path tracer 
+https://github.com/chunky-dev/chunky Minecraft worlds的路径追踪器
+
 ## 几何处理库
 ### igl
 https://github.com/libigl/libigl 几何处理库 网格处理 参数化(纹理映射 uv展开) 
