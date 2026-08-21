@@ -133,6 +133,27 @@ OpenGL 和 DirectX 的 cubemap 面顺序**相同**：
 
 #### 2.1 OpenGL Cubemap 面坐标系（基于 Mesa3D 源码 / OpenGL 规范）
 
+![alt text](<gl cubemap spec.png>)  
+ 
+![alt text](glwiki_cubemap.png)
+
+![alt text](各个face的上下左右.png) 
+
+- 以上spec为最终标准，mesa也是根据这个来的
+- uv坐标(s,t,r)是根据位于单位立方体中心的直角坐标系下的顶点坐标(rx,ry,rz,rw)根据公式映射而来
+- 映射公式的分母是带绝对值的
+- spec图表格里各栏的含义是
+  - 主轴方向(根据顶点坐标个分量绝对值最大的确定)代表6个面的槽位，也就是taget
+  - $s_c$ $t_c$ 列代表了带入$s$ $t$纹理坐标计算公式的对应变量，$-r_z$意思就是顶点坐标的z分量乘以-1，也就是0.7的z坐标变成-0.7
+  - $m_a$列代表主轴的位置分量，值本身有正负
+- glwiki图里
+  - 6个面没有flip，实际上cubemap的原点是左上角
+  - 坐标轴本身代表uv的方向
+  - 坐标轴上标出来的方向代表顶点坐标系对应的方向，同时也代表了带入$s$ $t$计算公式时使用的顶点坐标的变换，也就是gl spec里的$s_c$ $t_c$栏
+- 各个face的上下左右是根据前面两个规格推导的面向该面时图像四边对应的位置坐标的坐标轴
+- 看这6个面时，想象OpenGL的左手系，人站在立方体(位置坐标系)中心点，面向前方(+z),头朝上(+y),右是+x，绕朝上的顺时针转就切换4个侧面，仰头看天就是顶面/低头看地就是底面(初始朝前位姿)
+- 
+
 OpenGL 规范定义的 `sc`/`tc` 映射（来自 Mesa3D `choose_cube_face` 实现）：
 
 ```
@@ -147,7 +168,7 @@ direction     target                             sc     tc    ma
  -rz          TEXTURE_CUBE_MAP_NEGATIVE_Z        -rx    -ry   rz
 ```
 
-UV 计算公式：`u = (sc/ma + 1) * 0.5`，`v = (tc/ma + 1) * 0.5`
+UV 计算公式：`u = (sc / |ma| + 1) / 2`，`v = (tc / |ma| + 1) / 2`
 
 由 `sc`/`tc` 推导出每个面的 3D 方向：
 
