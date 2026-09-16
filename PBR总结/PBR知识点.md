@@ -1447,6 +1447,81 @@ $$
 
 所以你的理解对了，只需记住它多除了一个立体角，因此有单位 $\text{sr}^{-1}$，不是纯无量纲比值。
 
+## D的定义除以立体角微元的理解
+**除以 dωh 是为了让 D 成为“密度”而不是“份额”**——不除的话，这个比值依赖于你取的立体角微元有多大，不是一个点态函数；除完之后 D(ωh) 在每个方向上都有确定值，与微元大小无关。这和概率论里“概率”与“概率密度”的区别完全同构。
+
+
+
+### 1. pbrt 的原始定义
+
+pbrt 中 D 的定义式为：
+
+$$D(\omega_h)\, d\omega_h\, dA = dA_h(\omega_h)$$
+
+即：**法向落在 $\omega_h$ 附近 $d\omega_h$ 立体角内的微观表面积**。反解出来：
+
+$$D(\omega_h) = \frac{dA_h}{dA \cdot d\omega_h}$$
+
+量纲是 $\dfrac{m^2}{m^2 \cdot \text{sr}} = \text{sr}^{-1}$——**D 根本不是无量纲比值**。
+
+### 2. 为什么“面积比”本身不够用
+
+假设你只定义“朝向 ωh 的微表面面积 / 宏观面积”，记作 $R$：
+
+$$R(\omega_h, \Delta\omega) = \frac{\text{法向落在 } \Delta\omega \text{ 内的微面积}}{dA}$$
+
+问题在于 **R 依赖区间宽度 Δω**：
+
+| 取法 | 结果 |
+|------|------|
+| 以 ωh 为中心取 Δω = 0.1 sr | R = 0.05 |
+| 同一表面取 Δω = 0.2 sr（bin 加宽一倍） | R ≈ 0.10 |
+
+同一个表面、同一个方向，R 却随测量“分辨率”变化——它是**直方图的一条柱子**，不是表面本身的属性。除以 dωh 后：
+
+$$D = \lim_{\Delta\omega \to 0} \frac{R(\omega_h, \Delta\omega)}{\Delta\omega}$$
+
+得到**与 bin 宽无关的点态密度**——这才是直方图背后的 **PDF**，是表面粗糙度特征的固有描述。Δω → 0 时比值收敛到确定值，这正是“可微、可积分、可在每一点求值”的函数所需的条件。
+
+### 3. 同构的例子（你熟悉的辐射度学）
+
+这正是辐射度学里反复出现的“除以微元”模式：
+
+$$L = \frac{d^2\Phi}{dA \cos\theta \, d\omega}$$
+
+- 不除 $d\omega$：得到的是“这个方向锥里的功率”——锥多大数多大，没法比
+- 除以 $d\omega$：得到**辐射亮度**——与观察锥角无关的场量
+
+同理：概率 P/[0,1] vs 概率密度 pdf（单位 1/单位长度）；D 的地位就是“微表面法向分布的 pdf（对立体角测度）”。
+
+### 4. 密度形式才支撑后续所有公式
+
+pbrt 里 D 的所有用法都要求它是密度：
+
+**① 归一化约束**（微表面投影面积守恒）：
+
+$$\int_{\Omega_h} D(\omega_h) \cos\theta_h \, d\omega_h = 1$$
+
+被积函数必须是密度，积分才有意义。注意若只看总表面积：
+
+$$\int_{\Omega_h} D(\omega_h)\, d\omega_h = \frac{A_\text{micro}}{A_\text{macro}} \geq 1$$
+
+（粗糙表面微面积大于宏面积，这正是 D 可以远大于 1 的原因——GGX/Beckmann 在镜向峰值动辄几十上百，若把它当“比值 ≤1”就会觉得反直觉）。
+
+**② 微表面 BRDF 公式**：
+
+$$f_r \propto \frac{D(\omega_h)\, G\, F}{4 \cos\theta_o \cos\theta_i}$$
+
+D 在这里是密度，与 $d\omega_h$ 配合参与推导（从“对所有半程向量的贡献积分”到闭式解）。若 D 是“份额”，量纲全乱。
+
+**③ 重要性采样**：按 $D(\omega_h)\cos\theta_h$ 采样子 GGX——采样器需要的恰恰是 pdf，即密度形式。
+
+### 5. 直观记忆
+
+> “朝 ωh 的微表面占多大面积比例”是一个**数数**问题，答案取决于你筐子（dωh）多大；
+> **D 回答的是“这个朝向有多拥挤”**——单位立体角内的面积浓度。
+> 前者是直方图柱高，后者是分布曲线；除以 dωh 就是从柱高换算成曲线纵坐标。
+
 # 第四章：各种 BRDF / BSDF / BTDF / BSSRDF
 
 ## 4.1 函数族概览
@@ -1955,7 +2030,7 @@ $$\rho_{total} = \rho_{specular} + \rho_{diffuse} + \rho_{transmission} + \rho_{
 
 ---
 
-## 图形学散射函数与反射/折射体系全辨析
+## 6.7 图形学散射函数与反射/折射体系全辨析
 
 ### 1. BSDF 家族：谁负责反射，谁负责透射
 
@@ -2218,14 +2293,14 @@ $$
 
 > **Fresnel $F$ 是界面能量分流器**：$F$ 决定镜面反射比例，$1-F$ 决定透射比例。镜面反射由微表面 BRDF（$DGF/4\cos\theta_i\cos\theta_o$）描述方向分布；漫反射是透射光在材质内部散射后射出的部分，由 Lambert 模型 $\rho/\pi$ 描述。金属没有透射所以没有漫反射；电介质的漫反射系数必须乘 $(1-F)$，这才是能量守恒的正确比例。Snell 定律决定折射方向，Fresnel 决定折射/反射的能量分配，二者正交。
 
-## 几个概念的澄清定义            
+## 6.8 几个概念的澄清定义            
 根据pbrt原文和严格的物理定义，我来系统辨析这些概念，并重点澄清你质疑的 $k_d$、$f_{\text{diffuse}}$ 和 $\rho/\pi$ 问题。
 
 ---
 
-## 1. 核心散射函数：BRDF vs BTDF vs BSDF
+### 1. 核心散射函数：BRDF vs BTDF vs BSDF
 
-### 1.1 BRDF（双向反射分布函数）
+#### 1.1 BRDF（双向反射分布函数）
 
 **定义**（pbrt Eq.5.8）：
 
@@ -2235,7 +2310,7 @@ $$f_r(\omega_o, \omega_i) = \frac{dL_o(\omega_o)}{dE(\omega_i)} = \frac{dL_o(\om
 
 **单位**：$\text{sr}^{-1}$（球面度倒数）。
 
-### 1.2 BTDF（双向透射分布函数）
+#### 1.2 BTDF（双向透射分布函数）
 
 **定义**：
 
@@ -2243,7 +2318,7 @@ $$f_t(\omega_o, \omega_i) = \frac{dL_o(\omega_o)}{L_i(\omega_i)\cos\theta_i \, d
 
 **物理意义**：描述**透射**到表面另一侧的散射特性。
 
-### 1.3 BSDF（双向散射分布函数）
+#### 1.3 BSDF（双向散射分布函数）
 
 BSDF = BRDF + BTDF，是所有表面散射（反射+透射）的统称。pbrt中用 `BxDF` 作为BRDF和BTDF的共同基类。
 
@@ -2255,9 +2330,9 @@ BSDF = BRDF + BTDF，是所有表面散射（反射+透射）的统称。pbrt中
 
 ---
 
-## 2. 反射定律与折射定律
+### 2. 反射定律与折射定律
 
-### 2.1 反射定律（Law of Reflection）
+#### 2.1 反射定律（Law of Reflection）
 
 对于完美镜面反射：
 
@@ -2267,7 +2342,7 @@ $$\omega_o = \omega_i - 2(\omega_i \cdot \mathbf{n})\mathbf{n}$$
 - 入射角 = 反射角（相对于法线）
 - 入射方向、反射方向、法线三者共面
 
-### 2.2 折射定律（Snell's Law）
+#### 2.2 折射定律（Snell's Law）
 
 $$\eta_i \sin\theta_i = \eta_t \sin\theta_t$$
 
@@ -2285,9 +2360,9 @@ $$\omega_t = \eta \, \omega_i + \left(\eta \cos\theta_i - \cos\theta_t\right)\ma
 
 ---
 
-## 3. Fresnel效应与F项
+### 3. Fresnel效应与F项
 
-### 3.1 物理意义
+#### 3.1 物理意义
 
 Fresnel方程描述：当光到达两种介质的界面时，**有多少比例的能量被反射，有多少比例被透射**。
 
@@ -2295,7 +2370,7 @@ $$F(\theta_i) = \text{反射能量比例}, \quad T(\theta_i) = 1 - F(\theta_i) =
 
 **能量守恒**：$F + T = 1$（无吸收时）。
 
-### 3.2 关键特性
+#### 3.2 关键特性
 
 - **垂直入射（$\theta_i = 0$）**：F最小，记为 $F_0$
 - **掠射角（$\theta_i \to 90^\circ$）**：$F \to 1$，几乎所有光都被反射
@@ -2303,7 +2378,7 @@ $$F(\theta_i) = \text{反射能量比例}, \quad T(\theta_i) = 1 - F(\theta_i) =
   - **电介质（Dielectric）**：$F_0$ 很低（0.02~0.1），有明显的透射
   - **导体（Conductor/金属）**：$F_0$ 很高（0.5~1.0），几乎不透射，光进入后很快被吸收
 
-### 3.3 Schlick近似
+#### 3.3 Schlick近似
 
 $$F(\theta) \approx F_0 + (1 - F_0)(1 - \cos\theta)^5$$
 
@@ -2313,9 +2388,9 @@ $$F_0 = \left(\frac{\eta_1 - \eta_2}{\eta_1 + \eta_2}\right)^2$$
 
 ---
 
-## 4. 镜面反射与漫反射
+### 4. 镜面反射与漫反射
 
-### 4.1 镜面反射（Specular Reflection）
+#### 4.1 镜面反射（Specular Reflection）
 
 **物理机制**：光在表面**直接反射**，不进入材质内部。
 
@@ -2326,7 +2401,7 @@ $$F_0 = \left(\frac{\eta_1 - \eta_2}{\eta_1 + \eta_2}\right)^2$$
 
 $$f_{\text{specular}} = \frac{D(\omega_h) \, G(\omega_i, \omega_o) \, F(\omega_o, \omega_h)}{4(\mathbf{n}\cdot\omega_i)(\mathbf{n}\cdot\omega_o)}$$
 
-### 4.2 漫反射（Diffuse Reflection）
+#### 4.2 漫反射（Diffuse Reflection）
 
 **物理机制**：光**进入材质内部**，经过多次散射后，再射出表面，方向近似各向同性。
 
@@ -2338,11 +2413,11 @@ $$f_{\text{diffuse}}(\omega_i, \omega_o) = \frac{R}{\pi}$$
 
 ---
 
-## 5. 重点澄清：$k_d$、$f_{\text{diffuse}}$ 与 $\rho/\pi$
+### 5. 重点澄清：$k_d$、$f_{\text{diffuse}}$ 与 $\rho/\pi$
 
 你质疑得对，这里确实容易混淆。我来**严格区分**三个层次的概念：
 
-### 5.1 最基础的物理模型：能量分配
+#### 5.1 最基础的物理模型：能量分配
 
 在界面上，入射光能量分为两部分：
 
@@ -2359,7 +2434,7 @@ $$f_{\text{diffuse}}(\omega_i, \omega_o) = \frac{R}{\pi}$$
 
 $$\text{漫反射总能量比例} = (1 - F) \cdot \rho_{\text{diffuse}}$$
 
-### 5.2 正确的BRDF组合形式
+#### 5.2 正确的BRDF组合形式
 
 严格来说，完整的反射BRDF应该是：
 
@@ -2370,7 +2445,7 @@ $$f_r = f_{\text{specular}} + (1 - F) \cdot f_{\text{lambert}}$$
 - $f_{\text{lambert}} = \frac{\rho_{\text{diffuse}}}{\pi}$ 是Lambert漫反射BRDF本身
 - $(1-F)$ 是能量分配系数：只有没有被镜面反射的光才可能进入材质产生漫反射
 
-### 5.3 工程中的简化：$k_d$ 和 $k_s$
+#### 5.3 工程中的简化：$k_d$ 和 $k_s$
 
 在LearnOpenGL等实时渲染教程中，经常写成：
 
@@ -2378,10 +2453,10 @@ $$f_r = k_d \cdot \frac{\rho}{\pi} + k_s \cdot \frac{DFG}{4(\mathbf{n}\cdot\omeg
 
 这里的 $k_d$ 和 $k_s$ 是**工程化的比例系数**，需要明确：
 
-#### $k_s$（镜面比例系数）
+##### $k_s$（镜面比例系数）
 通常 $k_s = 1$，因为F项已经在镜面BRDF内部自动处理了角度相关的镜面反射比例。
 
-#### $k_d$（漫反射比例系数）
+##### $k_d$（漫反射比例系数）
 **金属-粗糙度工作流**中的标准公式：
 
 $$k_d = (1 - \text{metallic}) \cdot (1 - F)$$
@@ -2389,7 +2464,7 @@ $$k_d = (1 - \text{metallic}) \cdot (1 - F)$$
 - **金属（metallic=1）**：$k_d = 0$，金属没有漫反射（光进入后被全部吸收）
 - **电介质（metallic=0）**：$k_d = 1 - F$，与物理模型一致
 
-### 5.4 $\rho/\pi$ 中 $\rho$ 的准确含义
+#### 5.4 $\rho/\pi$ 中 $\rho$ 的准确含义
 
 pbrt原文中Lambertian BRDF的构造函数：
 
@@ -2411,7 +2486,7 @@ $$\int_{\Omega} f \cos\theta_i \, d\omega_i = \int_{\Omega} \frac{\rho}{\pi} \co
 
 这正好等于反照率 $\rho$，符合能量守恒。
 
-### 5.5 常见混淆点总结
+#### 5.5 常见混淆点总结
 
 | 符号 | 含义 | 取值范围 |
 |------|------|---------|
@@ -2425,7 +2500,7 @@ $$\int_{\Omega} f \cos\theta_i \, d\omega_i = \int_{\Omega} \frac{\rho}{\pi} \co
 
 ---
 
-## 6. Cook-Torrance分母中4的来源
+### 6. Cook-Torrance分母中4的来源
 
 根据pbrt 8.4.4节的推导，分母4来自两个投影面积的Jacobian变换：
 
@@ -2441,7 +2516,7 @@ $$\int_{\Omega} f \cos\theta_i \, d\omega_i = \int_{\Omega} \frac{\rho}{\pi} \co
 
 ---
 
-## 7. $f_r$、$D$、$G$、$F$ 的取值范围
+### 7. $f_r$、$D$、$G$、$F$ 的取值范围
 
 | 量 | 取值范围 | 说明 |
 |---|---------|------|
@@ -2455,11 +2530,11 @@ $$\int_{\Omega} f \cos\theta_i \, d\omega_i = \int_{\Omega} \frac{\rho}{\pi} \co
 
 ---
 
-## 8. D是不是概率密度？
+### 8. D是不是概率密度？
 
 D不是概率密度函数（PDF），但与PDF密切相关：
 
-### D的物理意义（pbrt原文定义）
+#### D的物理意义（pbrt原文定义）
 
 $$dA_h = D(\omega_h) \, d\omega_h \, dA$$
 
@@ -2469,7 +2544,7 @@ $$dA_h = D(\omega_h) \, d\omega_h \, dA$$
 
 **单位**：$\text{sr}^{-1}$
 
-### D的归一化条件
+#### D的归一化条件
 
 pbrt Eq.8.9：
 
@@ -2477,7 +2552,7 @@ $$\int_{H^2} D(\omega_h) \cos\theta_h \, d\omega_h = 1$$
 
 注意有个 $\cos\theta_h$ 项！这是投影面积守恒。
 
-### D与PDF的关系
+#### D与PDF的关系
 
 如果要根据微表面法线分布采样，对应的概率密度函数是：
 
@@ -2489,29 +2564,29 @@ $$p(\omega_h) = D(\omega_h) \cos\theta_h$$
 
 ---
 
-## 9. 关于 $\theta_h$、$\omega_i$、$\omega_h$ 的澄清
+### 9. 关于 $\theta_h$、$\omega_i$、$\omega_h$ 的澄清
 
-### 9.1 方向 vs 立体角
+#### 9.1 方向 vs 立体角
 
 - $\omega_i, \omega_o, \omega_h, \mathbf{n}$ 都是**单位方向向量**（3D向量）
 - $d\omega_i, d\omega_o, d\omega_h$ 是**立体角微分**（单位sr）
 
 立体角的定义：球面上的面积除以半径平方，$d\omega = \sin\theta \, d\theta \, d\phi$。方向向量指向球面上的一点，该点周围的小面积就是立体角。
 
-### 9.2 $\theta_h$ 的定义
+#### 9.2 $\theta_h$ 的定义
 
 在pbrt标准坐标系中：
 - 宏观表面法线 $\mathbf{n} = (0,0,1)$
 - $\theta_h$ 是微表面法线 $\omega_h$ 与宏观法线 $\mathbf{n}$ 的夹角
 - $\cos\theta_h = \omega_h \cdot \mathbf{n} = \omega_{h,z}$
 
-### 9.3 为什么 $\cos\theta_h = \omega_i \cdot \omega_h$？
+#### 9.3 为什么 $\cos\theta_h = \omega_i \cdot \omega_h$？
 
 这是**镜面反射条件**决定的，不是普遍成立！
 
 半角向量定义：
 
-$$\omega_h = \frac{\omega_i + \omega_o}{|\omega_i + \omega_o}|}$$
+$$\omega_h = \frac{\omega_i + \omega_o}{|\omega_i + \omega_o|}$$
 
 对于完美镜面反射微表面，$\omega_i$ 关于 $\omega_h$ 反射得到 $\omega_o$，此时：
 - $\omega_i$ 与 $\omega_h$ 的夹角 = $\omega_o$ 与 $\omega_h$ 的夹角
