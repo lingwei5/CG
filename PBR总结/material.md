@@ -1,5 +1,7 @@
 # PBR 主流模型参数对比：UE / Disney / Blender / OpenPBR
 
+https://academysoftwarefoundation.github.io/MaterialX/有网页端各个参数的修改效果
+
 本文对比四个主流 PBR 模型的**参数命名、含义、参数值变化对应的视觉效果**，并分析它们之间的异同。
 
 参考：
