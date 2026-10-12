@@ -1245,3 +1245,446 @@ z_ndc = (A*z_view + B) / (-z_view)
 ## 一句话总结
 
 **先逆投影再透视除法**是因为 NDC 已经做了透视除法，你无法单独恢复 w_clip。逆投影矩阵会把 NDC 转成一个齐次坐标，其中的 w 分量隐含了深度信息，最后一次除法同时解除了 w 的歧义并恢复了视图坐标。
+
+# 屏幕空间技术：SSAO、SSR 原理与实现
+
+前文解决了"从屏幕空间重建世界/视图空间位置与方向"的问题——这正是所有屏幕空间技术（Screen-Space Techniques）的**公共基础设施**。本章在此之上展开 SSAO、SSR 及相关技术的原理与实现。
+
+---
+
+## 1. 屏幕空间技术总论
+
+### 1.1 什么是"屏幕空间"
+
+屏幕空间技术指**只依赖 G-buffer（深度、法线、颜色等逐像素信息）进行计算**、不访问实际场景几何（三角形/加速结构）的算法。前向管线下可先用一个 pre-z pass 生成深度+法线。
+
+| 可用信息 | 获取方式 |
+|---|---|
+| 逐像素线性深度 | 深度缓冲 + 逆投影（见前文方法一） |
+| 逐像素视图/世界空间位置 | 深度重建（射线插值法/逆矩阵法） |
+| 逐像素法线 | G-buffer 直接读取，或从深度缓冲 ddx/ddy 重建 |
+| 逐像素颜色 | 不透明场景颜色缓冲（SSR 需要） |
+
+### 1.2 核心优势与共同局限
+
+**优势**：
+- 计算量 $O(\text{屏幕像素数} \times \text{采样数})$，与场景复杂度无关
+- 完美适配延迟渲染（G-buffer 天然存在）
+- 无需场景加速结构，GPU 友好
+
+**共同的根本局限**——只有"摄像机看得见的几何"存在：
+
+```
+实际场景：                     屏幕空间能"看到"的：
+   ┌────┐                        ┌────┐
+   │墙  │████ 深度缓冲 ██████████│墙  │
+   │    │   (只有最近表面)        │    │
+   │桌子│ ← 被墙挡住，深度里没有   │    │
+   └────┘                        └────┘
+```
+
+由此派生出所有屏幕空间技术的经典缺陷：**屏幕外信息缺失**（screen border cutoff）、**遮挡物缺失**（off-screen occluder）、**只取最近表面**（无多层深度）。后文各技术中反复出现的 fade、fallback 都是在弥补这一根本缺陷。
+
+### 1.3 从深度缓冲重建法线（无 G-buffer 法线时）
+
+利用相邻像素重建的位置差分：
+
+```glsl
+vec3 GetNormalFromDepth(vec2 uv, vec2 texel) {
+    vec3 p  = ReconstructViewPos(uv);
+    vec3 px = ReconstructViewPos(uv + vec2(texel.x, 0.0));
+    vec3 py = ReconstructViewPos(uv + vec2(0.0, texel.y));
+    return normalize(cross(px - p, py - p));  // 注意手性，可能需要取负
+}
+```
+
+精度低于 G-buffer 存储的几何法线，但 SSAO/SSR 均够用；深度不连续处（轮廓边缘）会出错，需与几何法线二选一并保持一致。
+
+---
+
+## 2. SSAO（Screen-Space Ambient Occlusion）
+
+### 2.1 物理基础：环境光遮蔽是什么
+
+环境光遮蔽描述**表面上一点被周围几何遮挡的程度**。从渲染方程看，间接光照的入射积分是对上半球方向立体角的积分；当遮挡发生时，部分方向无法"看到"环境，积分就要乘以可见性函数 $V(\omega)$：
+
+$$
+L_o(\mathbf{p},\,\omega_o) = \int_{\Omega} L_i(\mathbf{p},\,\omega)\; f_r(\mathbf{p},\,\omega,\,\omega_o)\; V(\mathbf{p},\,\omega)\; (\mathbf{n}\cdot\omega)\; d\omega
+$$
+
+环境光遮蔽把可见性项单独抽出来近似：
+
+$$
+\text{AO}(\mathbf{p}) = \frac{1}{\pi}\int_{\Omega} V(\mathbf{p},\,\omega)\; (\mathbf{n}\cdot\omega)\, d\omega \;\in\; [0, 1]
+$$
+
+$\text{AO}=1$ 表示完全无遮挡，$\text{AO}=0$ 表示完全被包裹。点 $\mathbf{p}$ 沿方向 $\omega$ 发射的射线**打到几何**则 $V=0$，否则 $V=1$——这是精确的求交问题，屏幕空间技术用"射线打到深度缓冲表面"来近似。
+
+### 2.2 SSAO 的近似原理（Crytek 2007 → 法线导向半球）
+
+**原始 Crytek 版本**（Crysis，2007）：在像素对应的表面点周围球体内取采样点，比较**采样点的深度与深度缓冲中投影位置的深度**——若采样点"更远"（被深度缓冲中的表面挡住），计入遮蔽。缺陷：采样球会有一半在表面下方，产生**自遮蔽**和灰蒙蒙的画面。
+
+**法线导向半球改进**（StarCraft II，2009）：沿表面法线取**上半球**内采样，消除表面下方的无效采样：
+
+```
+            采样半球（法线导向）
+          ╱ ─ ─ ─ ─ ╱
+        ╱     ·     ╱        · = 采样点
+      ╱    ·    ·  ╱
+    ────────┴──────── 表面
+              ↑ 法线
+```
+
+对每个采样点 $\mathbf{s}_i$（视图/世界空间坐标）：
+1. 投影到屏幕，得到 UV；
+2. 用该 UV 采样深度缓冲并重建该像素的表面位置 $\mathbf{q}_i$；
+3. 比较 $\mathbf{s}_i$ 与 $\mathbf{q}_i$ 的深度（视图空间 $z$ 或射线距离）：
+   - $\mathbf{s}_i$ 在表面**后方**（$z_{s_i} > z_{q_i}$，比 q 更远）→ 被遮蔽；
+   - 否则未遮蔽。
+4. 加入距离衰减与范围裁剪，避免远处几何污染局部 AO：
+
+$$
+\text{AO}(\mathbf{p}) = 1 - \frac{1}{N}\sum_{i=1}^{N} O(\mathbf{p},\,\mathbf{s}_i), \qquad
+O(\mathbf{p},\,\mathbf{s}_i) = \begin{cases} \mathrm{falloff}(|\mathbf{s}_i - \mathbf{q}_i|) & z_{s_i} > z_{q_i} \text{ 且 } |\mathbf{s}_i - \mathbf{p}| < R \\[2pt] 0 & \text{否则} \end{cases}
+$$
+
+其中 $R$ 为 AO 采样半径，$\mathrm{falloff}(d) = \max(0,\, 1 - (d/R)^2)$ 之类的衰减函数。
+
+### 2.3 实现管线
+
+```
+G-buffer(深度+法线)
+    ↓
+逐像素：重建表面位置 p 和法线 n
+    ↓
+在 p 周围法线导向半球内取 N 个采样点（随机旋转向量消除带状伪影）
+    ↓
+每个采样点 → 投影到屏幕 UV → 采样深度 → 重建表面位置 → 深度比较 → 累计遮蔽
+    ↓
+AO 图（半分辨率 + 交错采样 / 噪声抖动）
+    ↓
+双边模糊（bilateral blur，保护深度边缘）
+    ↓
+最终着色：ambientColor *= AO（仅乘到环境光/IBL 项上，不影响直接光）
+```
+
+### 2.4 GLSL 实现（延迟管线，视图空间）
+
+```glsl
+uniform sampler2D depthMap;
+uniform sampler2D noiseTex;       // 4x4 随机旋转向量
+uniform mat4 invProjection;
+uniform mat4 projection;
+uniform vec2 screenSize;
+uniform float aoRadius;           // 世界/视图空间半径
+uniform float nearPlane, farPlane;
+
+vec3 ReconstructViewPos(vec2 uv, float depth) {
+    vec4 ndc = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);  // OpenGL
+    vec4 viewPos = invProjection * ndc;
+    return viewPos.xyz / viewPos.w;
+}
+
+float LinearDepth(float depth) {
+    float z = depth * 2.0 - 1.0;
+    return (2.0 * nearPlane * farPlane) /
+           (farPlane + nearPlane - z * (farPlane - nearPlane));
+}
+
+// 生成法线导向半球的正交基（TBN）
+mat3 GetTBN(vec3 n, vec3 randomVec) {
+    vec3 t = normalize(randomVec - n * dot(randomVec, n));
+    vec3 b = cross(n, t);
+    return mat3(t, b, n);
+}
+
+float ComputeSSAO(vec2 uv) {
+    float depth = texture(depthMap, uv).r;
+    if (depth >= 1.0) return 1.0;                  // 天空
+
+    vec3 fragPos = ReconstructViewPos(uv, depth);
+    vec3 normal  = GetNormalFromDepth(uv, 1.0 / screenSize);  // 或从G-buffer读
+
+    // 随机旋转向量：每像素不同的噪声，配合模糊消除带状
+    vec2 noiseScale = screenSize / 4.0;
+    vec3 randomVec = normalize(texture(noiseTex, uv * noiseScale).xyz * 2.0 - 1.0);
+    mat3 TBN = GetTBN(normal, randomVec);
+
+    // 预生成的半球采样核（CPU端生成，单位球内、偏向法线方向）
+    // vec3 samples[64]: normalize(randomVec3) * lerp(0.1, 1.0, pow(rand, 2)) 半径分布
+    const int KERNEL_SIZE = 64;
+    float occlusion = 0.0;
+
+    for (int i = 0; i < KERNEL_SIZE; ++i) {
+        vec3 samplePos = TBN * samples[i];         // 视图空间采样方向
+        samplePos = fragPos + samplePos * aoRadius;
+
+        // 视图空间 → 屏幕 UV（正向投影）
+        vec4 offset = projection * vec4(samplePos, 1.0);
+        offset.xyz /= offset.w;
+        vec2 sampleUV = offset.xy * 0.5 + 0.5;
+
+        // 采样深度缓冲，重建该处的表面位置
+        float sampleDepth = texture(depthMap, sampleUV).r;
+        vec3 scenePos = ReconstructViewPos(sampleUV, sampleDepth);
+
+        // 范围检查 + 深度比较
+        float sceneZ = -scenePos.z;                // 视图空间相机看向-Z
+        float sampleZ = -samplePos.z;
+        float rangeCheck = smoothstep(0.0, 1.0, aoRadius / abs(fragPos.z - scenePos.z));
+        if (sampleZ > sceneZ)                      // 采样点在表面后方 → 遮蔽
+            occlusion += rangeCheck;
+    }
+    return 1.0 - (occlusion / KERNEL_SIZE);
+}
+```
+
+随后对 AO 图做双边模糊（按深度差加权，避免把轮廓边缘糊掉），再在光照 pass 中应用：
+
+```glsl
+vec3 ambient = texture(irradianceMap, worldNormal).rgb * albedo;
+vec3 color   = directLight + ambient * texture(aoMap, uv).r;   // AO 只作用于环境光
+```
+
+### 2.5 主要变体对比
+
+| 算法 | 核心思想 | 优点 | 缺点 |
+|---|---|---|---|
+| **SSAO**（Crytek） | 球内采样点深度比较 | 实现简单 | 自遮蔽、整体偏暗 |
+| **SSAO**（法线半球） | 半球采样深度比较 | 消除自遮蔽 | 采样数要求高、噪声 |
+| **HBAO**（Horizon-based） | 在切平面上对若干方向积分**地平线角** $\arccos$ | 物理更准确、锐利 | 需要精确法线、切向积分成本 |
+| **GTAO**（Grounded/Backed AO） | HBAO 基础上对可见球缺积分并补偿 cos 权重，能量守恒 | 无距离衰减参数、面积精确 | 实现复杂 |
+| **SAO**（Scalable AO） | 线性化的能见度函数解析近似 | 少量采样即收敛、适合半分辨率 | 有轻微过模糊 |
+| **ASSAO / MSAO** | 组合式（屏幕+世界空间混合采样） | 引擎级质量/性能平衡 | 实现最复杂 |
+
+HBAO 的核心公式——对方向 $\phi$ 上找到的地平线角 $h(\phi)$ 积分：
+
+$$
+\text{AO}_{\text{HBAO}} = \frac{1}{\pi}\int_{\phi=0}^{2\pi}\int_{t=0}^{R} W(t)\; \big[\cos\big(h(\phi)\big) - \cos\big(t\big)\big]^+\; dt \, d\phi
+$$
+
+即"表面点到地平线之间的天空立体角"的解析积分，比逐采样点二值判断更连续。
+
+### 2.6 常见伪影与对策
+
+| 伪影 | 原因 | 对策 |
+|---|---|---|
+| 带状/块状条纹 | 采样核旋转噪声分辨率过低 | 提高 noise 纹理随机性 + 双边模糊 |
+| Halo（亮环） | 距离/范围检查缺失，远处表面错误遮蔽 | range check（半径裁剪） |
+| 轮廓边缘亮/黑边 | 深度不连续处重建法线错误 | 用 G-buffer 几何法线 |
+| 光晕翻转（silhouette darkening） | 遮挡者其实在被遮挡者**背后**很远 | 厚度假设/双向比较 |
+| 闪烁（TAA 时代前） | 噪声随帧变化 | 时域累积（与 TAA 结合） |
+
+---
+
+## 3. SSR（Screen-Screen Reflections / 屏幕空间反射）
+
+### 3.1 物理基础
+
+镜面反射同样是渲染方程的 BRDF 项，理想镜面下退化为沿反射方向 $\omega_r$ 的单次采样：
+
+$$
+L_o^{\text{spec}}(\mathbf{p},\,\omega_o) \approx L_i(\mathbf{p},\,\omega_r)\; F(\omega_o,\,\mathbf{n})\;(\mathbf{n}\cdot\omega_o)
+$$
+
+其中 $\omega_r = 2(\mathbf{n}\cdot\omega_o)\mathbf{n} - \omega_o$。粗糙表面上 BRDF lobe 变宽，需要沿 lobe 多次采样反射方向并按 NDF 加权。
+
+**离线渲染**沿 $\omega_r$ 做真正的光线求交（BVH）；**SSR 用深度缓冲近似场景几何**：把反射射线逐步步进，每步投影回屏幕，与深度缓冲比较——射线"钻入"深度表面之下即视为命中。
+
+### 3.2 算法流程
+
+```
+1. 从 G-buffer 取像素位置 p、法线 n（视图空间）
+2. 视线方向 v（p → 相机，即 -p 归一化，视图空间相机在原点）
+3. 反射方向 r = reflect(-v, n)（注意 GLSL reflect(I, N) 的 I 是指向表面的入射方向）
+4. Ray March：
+   for step in [0..N]:
+       t += stepSize          // 或 DDA / Hi-Z 自适应步长
+       pos = p + r * t        // 视图空间
+       uv = Project(pos)      // 正向投影 → 屏幕UV
+       if uv 出屏 → miss（屏幕外信息缺失）
+       sceneZ = 重建(uv 处深度).z
+       if pos.z < sceneZ - bias:   // 射线在表面后方 → 命中
+           命中 → 可选二分细化命中点
+5. 命中：采样场景颜色缓冲（命中点 uv）
+   未命中：fallback 到 cubemap / 探针（probe）
+6. 屏幕边缘淡出 + 距离淡出 → 与 fallback 颜色按权重混合
+```
+
+### 3.3 关键细节
+
+**（a）固定步长的走样问题**：固定世界空间步长 $\Delta t$ 时，远处射线在屏幕上的投影步长极小（浪费）或极小步长覆盖全屏（开销大）——透视导致屏幕空间步长不均匀。改进方案：
+
+- **屏幕空间等步进（linear in screen space）**：直接在屏幕 UV 域做线性步进（DDA），但射线在视图空间中就不再等速，命中检测需谨慎；
+- **Hi-Z 层级追踪**：构建深度缓冲的 mip 链（每层取最小深度/最远表面），射线按"安全步长"逐层下降，命中后逐层回溯细化——工业级方案，几乎无走样。
+
+**（b）命中判定与厚度**：命中即"射线上某点的深度比场景深度更远"。但深度缓冲是**单层薄壳**，不知道墙有多厚。引入厚度参数 $T$：命中点处若 $\text{sceneZ} - \text{pos.z} > T$ 则视为"射线穿过了薄墙的背面间隙"，判为未命中继续前进：
+
+```glsl
+float thickness = 0.5;  // 视图空间单位，经验值
+if (pos.z < sceneZ - bias && pos.z > sceneZ - thickness)
+    hit = true;
+```
+
+**（c）二分细化（binary search refinement）**：粗步进命中区间 $[t_0, t_1]$ 后，在区间内二分 4–6 次逼近精确交点，消除步长导致的"条带"：
+
+```glsl
+for (int i = 0; i < 6; ++i) {
+    float tMid = (t0 + t1) * 0.5;
+    vec3 pos = p + r * tMid;
+    vec2 uv = Project(pos);
+    float sceneZ = -ReconstructViewPos(uv, texture(depthMap, uv).r).z;
+    if (-pos.z < sceneZ) { t1 = tMid; } else { t0 = tMid; }  // 收缩命中区间
+}
+```
+
+**（d）边缘淡出与 fallback**：命中点接近屏幕边缘或射线出屏时，屏幕空间结果不可信，需淡出到 cubemap：
+
+```glsl
+vec2 border = min(hitUV, 1.0 - hitUV);
+float screenFade = smoothstep(0.0, 0.1, min(border.x, border.y));
+vec3 reflColor = mix(cubemapColor, ssrColor, screenFade);
+```
+
+**（e）粗糙表面**：Glossy SSR 需要沿 BRDF lobe 多次采样（重要性采样 GGX），每条仍是完整 ray march——代价极高。工程做法：半分辨率 SSR + 时域累积（TAA 糊掉噪声），或对 SSR 结果按命中距离做 blur 预处理成"屏幕空间反射 mip"，按粗糙度采样对应层级（UE4 的做法之一）。
+
+### 3.4 GLSL 实现（视图空间，固定步长 + 二分细化）
+
+```glsl
+uniform sampler2D depthMap;      // 场景深度
+uniform sampler2D sceneColor;    // 不透明场景颜色
+uniform samplerCube fallbackCube;
+uniform mat4 projection, invProjection;
+
+struct SSRResult {
+    vec3  color;
+    float alpha;    // SSR 权重（0 = 完全用 fallback）
+};
+
+// 视图空间点 → 屏幕 UV（含透视除法）
+vec2 ProjectToUV(vec3 viewPos, out float viewZ) {
+    vec4 clip = projection * vec4(viewPos, 1.0);
+    viewZ = clip.w;                      // w_clip = -z_view，即距离
+    return clip.xy / clip.w * 0.5 + 0.5;
+}
+
+SSRResult ComputeSSR(vec3 fragPos, vec3 normal) {
+    SSRResult result = SSRResult(vec3(0.0), 0.0);
+
+    vec3 viewDir = normalize(-fragPos);              // p → 相机（原点）
+    vec3 reflDir = reflect(-viewDir, normal);        // GLSL: reflect(I, N), I 指向表面
+
+    float stepSize = 0.1;                            // 视图空间步长
+    const int MAX_STEPS = 64;
+    const float THICKNESS = 0.5;
+
+    float t = stepSize;
+    float tPrev = 0.0;
+    vec2 uv; float rayViewZ;
+
+    for (int i = 0; i < MAX_STEPS; ++i) {
+        vec3 pos = fragPos + reflDir * t;
+        uv = ProjectToUV(pos, rayViewZ);
+
+        // 出屏 → miss
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+            return result;
+
+        float sceneDepth = texture(depthMap, uv).r;
+        if (sceneDepth >= 1.0) { tPrev = t; t += stepSize; continue; }  // 天空，继续
+
+        vec3 scenePos = ReconstructViewPos(uv, sceneDepth);
+        float delta = -pos.z - (-scenePos.z);        // 射线z − 表面z（相机看向-Z，取正距离）
+
+        if (delta < 0.0) {                           // 射线已钻到表面后方 → 命中区间 [tPrev, t]
+            // 二分细化
+            float t0 = tPrev, t1 = t;
+            for (int j = 0; j < 6; ++j) {
+                float tm = (t0 + t1) * 0.5;
+                vec3 pm = fragPos + reflDir * tm;
+                float junkZ; vec2 um = ProjectToUV(pm, junkZ);
+                float sd = texture(depthMap, um).r;
+                vec3 sp = ReconstructViewPos(um, sd);
+                ((-pm.z - (-sp.z)) < 0.0) ? t1 = tm : t0 = tm;
+            }
+            float tHit = (t0 + t1) * 0.5;
+            vec3 hitPos = fragPos + reflDir * tHit;
+            float hitZ; vec2 hitUV = ProjectToUV(hitPos, hitZ);
+
+            // 厚度与边缘淡出
+            vec2 border = min(hitUV, 1.0 - hitUV);
+            float fade  = smoothstep(0.0, 0.08, min(border.x, border.y));
+            float distFade = 1.0 - smoothstep(20.0, 50.0, length(hitPos - fragPos));
+
+            result.color = texture(sceneColor, hitUV).rgb;
+            result.alpha = fade * distFade;
+            return result;
+        }
+        if (delta > THICKNESS) { /* 穿过薄表面间隙，视为未命中 */ }
+
+        tPrev = t;
+        t += stepSize * (1.0 + t * 0.05);            // 简单的步长增长
+    }
+    return result;   // alpha = 0 → 纯 fallback
+}
+
+// 应用
+void main() {
+    // ... fragPos/normal 来自 G-buffer 重建 ...
+    SSRResult ssr = ComputeSSR(fragPos, normal);
+    vec3 fallback = texture(fallbackCube, mat3(invView) * reflDirWorld).rgb;
+    vec3 reflection = mix(fallback, ssr.color, ssr.alpha);
+    // Fresnel（Schlick）加权后加入着色
+    float F = F0 + (1.0 - F0) * pow(1.0 - max(dot(normal, viewDir), 0.0), 5.0);
+    color += reflection * F * specularIntensity;
+}
+```
+
+### 3.5 SSR 专属伪影
+
+| 伪影 | 原因 | 对策 |
+|---|---|---|
+| 反射物在屏幕边缘"消失" | 屏幕外几何不存在 | border fade + cubemap fallback |
+| 被遮挡物的反射缺失（反射出"看不见的东西"失败） | 深度缓冲只有最近表面 | 无法根治，fallback 补偿 |
+| 阶梯状/条带 | 步长过大 | 二分细化 / Hi-Z |
+| 穿透薄墙 | 单层深度 + 厚度假设不准 | thickness 参数、双向 ray march |
+| 粗糙面反射噪点 | lobe 多采样的蒙特卡洛噪声 | 半分辨率 + TAA / SSR mip |
+| 视角突变时反射"跳变" | 屏幕内容随视角改变 | 时域累积/权重淡出 |
+
+---
+
+## 4. 其他屏幕空间技术简介
+
+### 4.1 SSGI（Screen-Space Global Illumination）
+SSR 的推广：不只在镜面方向追踪，而是在半球内**多次弹射采样**（1-bounce GI），把命中点的颜色缓冲当作"发光体"累积：
+$$
+L_{\text{indirect}}(\mathbf{p}) = \sum_i L_{\text{color}}(\mathbf{q}_i)\;\frac{\cos\theta_i}{N}\;V(\mathbf{q}_i)
+$$
+噪声极大，必须配合 TAA/时域滤波（SSRT/DH-GI 类做法均如此）。
+
+### 4.2 SSDO（Screen-Space Directional Occlusion）
+SSAO 的推广：把"遮蔽"升级为"有方向的遮挡"——被遮蔽的方向不是变黑，而是**采样遮挡物表面的颜色作为间接光**（遮蔽者同时也反射光）。一次采样同时得到 AO 与 1-bounce 间接光。
+
+### 4.3 屏幕空间接触阴影（Screen-Space Contact Shadows）
+对小范围直接光（如手电、局部点光）做短距离 ray march：从像素沿光方向步进几步深度比较即可，比完整阴影贴图便宜，用于补充近距离阴影细节，与 shadow map 叠加。
+
+### 4.4 屏幕空间贴花（Screen-Space Decals）
+从相机向像素发射射线，与场景深度重建表面求交，把贴花投影到"深度壳"上。同样受屏幕外/遮挡限制。常见于弹孔、脚印。
+
+### 4.5 SSSSS（Screen-Space Subsurface Scattering）
+对皮肤等强次表面散射材质，先用不透明 pass 渲染，再在屏幕空间对颜色缓冲做**按深度缩放的 separable 高斯模糊**（多次 pass 不同的核宽度叠加）近似扩散剖面，最后恢复高光。
+
+---
+
+## 5. 总结对比表
+
+| 技术 | 输入 | 输出 | 本质近似 | 典型缺陷 |
+|---|---|---|---|---|
+| **SSAO** | 深度(+法线) | 遮蔽标量 | 半球可见性积分 → 采样点深度比较 | Halo、轮廓伪影 |
+| **HBAO/GTAO** | 深度+法线 | 遮蔽标量 | 地平线角解析积分 | 需精确法线 |
+| **SSR** | 深度+法线+颜色 | 反射颜色 | BVH 求交 → 深度缓冲 ray march | 屏幕外缺失、穿透 |
+| **SSGI/SSDO** | 深度+法线+颜色 | 间接光 | 多次弹射 → 屏幕颜色当光源 | 噪声大 |
+| **Contact Shadows** | 深度 | 阴影 | 阴影贴图 → 短程 ray march | 仅近距离 |
+| **Decals** | 深度 | 贴花 | 几何求交 → 深度壳投影 | 边缘锯齿 |
+
+**一以贯之的思想**：所有屏幕空间技术都是把"三维场景的几何求交/可见性查询"降级为"深度缓冲上的逐像素查询"，用本文第二章的位置重建作为桥梁（屏幕像素 ↔ 视图/世界空间位置）。换来的是与场景复杂度无关的常量开销，代价是只有摄像机看得见的才存在——因此所有这些技术都需要 fade/fallback/时域滤波作为工程兜底。

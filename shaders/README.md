@@ -1,6 +1,6 @@
 # Shader 效果总结
 
-本目录收录了 20 个常见游戏/渲染效果的 GLSL 代码，按类别整理如下。
+本目录收录了 28 个常见游戏/渲染效果的 GLSL 代码，按类别整理如下。
 
 ---
 
@@ -220,6 +220,102 @@
 
 ---
 
+## 五、镜头与胶片效果
+
+### 21. chromatic_aberration.glsl — 色差与镜头畸变
+
+| 项 | 说明 |
+|---|---|
+| 核心算法 | 径向/横向色差 + Brown-Conrady 畸变模型 + 鱼眼投影 |
+| 关键函数 | `radialChromaticAberration()`、`barrelDistortUV()`、`undistortUV()`（牛顿迭代逆畸变）、`fisheyeDistortion()`、`vintageWideAngleLens()` 综合老镜头 |
+| 可调参数 | amount（色散强度）、k1/k2（畸变系数，负=桶形 正=枕形）、fov（鱼眼） |
+| 技术要点 | 色差随半径平方增长（中心清晰边缘色散）；逆畸变用 2~3 次牛顿迭代近似 |
+| 适用场景 | 电影感后处理、广角镜头模拟、真实镜头畸变校正 |
+
+### 22. lens_flare.glsl — 镜头光晕
+
+| 项 | 说明 |
+|---|---|
+| 核心算法 | 鬼影序列 + 光环 + 星芒衍射 + 变形宽银幕条纹 + 污渍 |
+| 关键函数 | `lensGhosts()` 鬼影（哈希随机化位置/大小/镀膜色）、`starburst()` 星芒、`anamorphicStreak()` 蓝色横条、`flareVisibility()` 遮挡淡出 |
+| 可调参数 | intensity、count（鬼影数）、radius（光环） |
+| 技术要点 | 鬼影分布在光源-中心对称点连线上；遮挡图螺旋采样实现光源被挡时整体淡出 |
+| 适用场景 | 强光源逆光、科幻电影蓝条纹、FPS 屏幕特效 |
+
+### 23. film_grain.glsl — 胶片颗粒与暗角
+
+| 项 | 说明 |
+|---|---|
+| 核心算法 | 亮度相关颗粒（中间调最明显）+ cos⁴ 暗角 + 老电影综合 |
+| 关键函数 | `filmGrainLuminance()`、`filmGrainColor()`（三层乳剂彩噪）、`vignetteRoundedRect()`（16:9 适配）、`oldFilm()`（划痕/尘埃/闪烁/褪色） |
+| 可调参数 | amount（颗粒强度）、strength（暗角）、intensity |
+| 技术要点 | 真实胶片颗粒在 0.25 亮度处峰值；暗角用超椭圆匹配宽屏；划痕按行哈希触发 |
+| 适用场景 | 电影质感、恐怖片氛围、怀旧风格 |
+
+---
+
+## 六、风格化与数字故障
+
+### 24. glitch.glsl — 数字故障
+
+| 项 | 说明 |
+|---|---|
+| 核心算法 | RGB 错位 + 块位移 + 扫描撕裂 + 波形扭曲 + 信号丢失，按时间哈希阵发触发 |
+| 关键函数 | `glitchRGBShift()`、`glitchBlockDisplacement()`、`glitchSignalLoss()`、`glitchFrameJitter()`、`fullGlitch()` 综合 |
+| 可调参数 | intensity、probability、maxShift/maxOffset |
+| 技术要点 | "随机触发"是灵魂：正常画面偶尔爆发；所有随机以行/块/帧为单位哈希，保证时空结构感 |
+| 适用场景 | 赛博朋克、科幻 UI、受干扰的监视器画面 |
+
+### 25. pixelation.glsl — 像素化 / 抖动 / CRT
+
+| 项 | 说明 |
+|---|---|
+| 核心算法 | UV 量化像素化 + Bayer 有序抖动 + CRT 扫描线/荫罩/弯曲 |
+| 关键函数 | `pixelate()`、`posterizeDither()`（Bayer 4x4）、`ign()`（交错梯度噪声）、`crtApertureGrille()`、`crtCurve()`、`fullCRT()` |
+| 可调参数 | targetRes（目标分辨率）、levels（色阶数）、curvature |
+| 技术要点 | 抖动用空间图案换取色阶（复古主机原理）；Bayer 递归结构纯算术生成无需纹理 |
+| 适用场景 | 像素风游戏、GBC/PS1 复古模拟、老式显示器风格 |
+
+---
+
+## 七、变形与材质细节
+
+### 26. shockwave.glsl — 冲击波与 UV 变形
+
+| 项 | 说明 |
+|---|---|
+| 核心算法 | 冲击波环折射 + 涟漪正弦环 + 旋涡角度场 + 球面重映射 |
+| 关键函数 | `shockwave()`（年龄驱动）、`rippleOffset()`、`twirlOffset()`、`bulgeOffset()`、`explosionEffect()` 综合 |
+| 可调参数 | maxRadius、age（0→1 传播进度）、frequency、angle（扭转角） |
+| 技术要点 | 全部是"改 UV 再采样"的后处理；波环剖面用 sin 钟形保证一阶导连续 |
+| 适用场景 | 爆炸、传送门、雨落水面、魔法漩涡、放大镜 |
+
+### 27. parallax.glsl — 视差贴图
+
+| 项 | 说明 |
+|---|---|
+| 核心算法 | 高度场 raymarch：基础偏移 → 陡峭视差 → POM 插值精修 + 自阴影 |
+| 关键函数 | `parallaxOcclusionMapping()`（主流方案）、`pomSelfShadow()`（软阴影）、`buildTBNCotangent()`（dFdx 现建 TBN）、`applyPORMaterial()` 完整示例 |
+| 可调参数 | heightScale、layers（步进层数，视角自适应） |
+| 技术要点 | 切线空间计算；最后两步线性插值求交点；层数随 viewDir.z 动态调整 |
+| 适用场景 | 石墙/地砖/木纹等高细节表面，法线贴图的进阶替代 |
+
+---
+
+## 八、噪声库
+
+### 28. noise.glsl — 程序化噪声全家桶
+
+| 项 | 说明 |
+|---|---|
+| 核心内容 | 白噪声/值噪声(1D/2D/3D)/Perlin 梯度/Simplex/Worley/Voronoi 边界/fBm/脊状分形/湍流/域扭曲/可平铺/旋度噪声/交错梯度噪声 |
+| 关键函数 | `hash12()`/`hash22()` 哈希族、`perlinNoise()`、`simplexNoise()`（Ashima 版）、`voronoiEdgeDistance()`（iq 精确边界）、`fbm()`、`domainWarp()`、`tileableFbm()`、`curlNoise()` |
+| 技术要点 | 开头附噪声选型指南；Perlin 用 quintic fade（C2 连续）；可平铺噪声的周期随倍频同步翻倍；IGN 配合 TAA 收敛快 |
+| 应用示例 | `marbleColor()` 大理石、`rockColor()` 石头、`starField()` 星空 |
+| 适用场景 | 所有程序化纹理的地基；本目录 clouds/fire/dissolve 的 fBm 均可替换为本库实现 |
+
+---
+
 ## 快速索引
 
 | 效果 | 文件 | 核心技术 |
@@ -244,6 +340,14 @@
 | 边缘高亮 | edge_highlight.glsl | Sobel + Fresnel |
 | 交界高亮 | intersection_highlight.glsl | 深度差 + SDF |
 | 体积光 | god_rays.glsl | 径向模糊 + 相位函数 |
+| 色差畸变 | chromatic_aberration.glsl | Brown-Conrady + RGB 分离 |
+| 镜头光晕 | lens_flare.glsl | 鬼影 + 星芒 + 变形条纹 |
+| 胶片颗粒 | film_grain.glsl | 亮度相关噪声 + cos⁴ 暗角 |
+| 数字故障 | glitch.glsl | 块位移 + RGB 错位 + 随机触发 |
+| 像素化/CRT | pixelation.glsl | UV 量化 + Bayer 抖动 + 荫罩 |
+| 冲击波变形 | shockwave.glsl | 波环折射 + 旋涡 + 涟漪 |
+| 视差贴图 | parallax.glsl | 高度场 raymarch (POM) |
+| 噪声库 | noise.glsl | Perlin/Simplex/Worley/fBm/域扭曲 |
 
 
 # PBRT PBR 展示 Shader 分析
