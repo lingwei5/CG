@@ -458,6 +458,7 @@ stb_truetype
 10. [Ministry of Flat](http://www.quelsolaar.com/ministry_of_flat/) - Commercial automated UV unwrapper.
 11. [seamoptimizer](https://github.com/ands/seamoptimizer) - A C/C++ single-file library that minimizes the hard transition errors of disjoint edges in lightmaps.
 12. [simpleuv](https://github.com/huxingyi/simpleuv/) - Automatic UV Unwrapping Library for Dust3D.
+13. https://github.com/SpartanJ/SOIL2 opengl dds 库
 
 ### tev
 大量使用17 20
