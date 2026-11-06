@@ -239,6 +239,25 @@ https://dev.epicgames.com/documentation/unreal-engine/unreal-engine-material-pro
 # Create Visual Effects
 # Gameplay Tutorials
 # Blueprint Visual Scripts
+蓝图在引擎里会保存为uasset资产，有不同类型的蓝图资产
+
+## Types of Blueprints
+1. blueprint class
+2. level blueprint
+3. blueprint interface
+4. blueprint Library
+   1. blueprint function library
+   2. blueprint marco library
+5. blueprint utility(editor only)
+
+
+## Introduction to Blueprints
+
+## Blueprint Workflows
+
+## Anatomy of Blueprint
+
+
 # Programming With C++ 
 # Gameplay System 游戏系统
 # Mobile Development
