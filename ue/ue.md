@@ -282,3 +282,71 @@ alt+c：碰撞开闭
 ctrl是控制actor之类的操作以及复制粘贴啥的
 ctrl+g：打组 shift+G取消打组
 G上帝视角吧？
+
+# UE前缀含义 
+UE 的前缀不是装饰，是**类型系统的视觉标签**——一眼看出这个类归哪一套体系、有没有反射、能不能进关卡、谁管它的内存。
+
+## 一、核心前缀速查
+
+| 前缀 | 适用类型 | 典型例子 | 背后含义 |
+|---|---|---|---|
+| **U** | 继承 `UObject` | `UActorComponent`、`UStaticMesh`、`UTexture` | 走反射、序列化、GC、蓝图可见 |
+| **A** | 继承 `AActor` | `ACharacter`、`APlayerController` | UObject 的子集，能放进关卡、有 Transform、有 Tick |
+| **F** | 普通类/结构体，不继承 UObject | `FVector`、`FSceneInterface`、`FHitResult` | 原生 C++ 类型，无 GC，靠栈/智能指针/手动管理 |
+| **I** | 接口类（抽象契约） | `IRendererModule`、`IAssetRegistry` | 纯虚或默认实现的抽象基类 |
+| **S** | Slate UI 控件 | `SButton`、`SCompoundWidget` | Slate 即时模式 GUI 体系 |
+| **T** | 模板类 | `TArray`、`TMap`、`TSharedPtr` | 泛型，实例化后别名按实际类型改前缀 |
+| **E** | 枚举 | `ECollisionChannel`、`ENetRole` | 枚举项本身不再带 E |
+| **b** | 布尔成员（不是类型前缀） | `bPendingDestruction` | 变量级约定 |
+| **G** | 全局单例/全局对象 | `GEngine`、`GWorld` | 全局状态 |
+
+这套规则里，U/A/S/I/T/E 对**被反射的类型**基本是 UHT（Unreal Header Tool）强制要求的，前缀写错会直接编译不过或反射生成异常 。
+
+## 二、你举的两个例子拆开看
+
+### `IRendererModule`
+- `I` = 接口。它定义“渲染模块应该提供什么能力”，不关心具体是谁实现（可能是 D3D12、Vulkan、Metal 各自的模块）
+- 模块通过 `IModuleInterface` 派生 + 工厂返回 `IRendererModule*`，调用方只依赖接口，不依赖具体渲染后端
+- 类似你写 C++ 时的纯虚基类，但在 UE 里是“模块解耦”的核心手法
+
+### `FSceneInterface`
+- `F` = 普通引擎类型（不是 UObject，不被 GC 管）
+- `SceneInterface` 是场景系统的抽象接口，但用 `F` 而不是 `I`——因为**它往往带数据成员、有具体子类（如 `FScene`）**，不是纯契约
+- 这说明一个细节：**UE 里 `I` 和 `F` 的界限不是“有没有虚函数”，而是“是不是纯抽象契约”**
+
+## 三、为什么非得有这套前缀
+
+### 1. UHT 和反射系统要靠它工作
+UE 的反射（UCLASS/USTRUCT/UENUM 宏）在预处理阶段由 UHT 扫描头文件，前缀错了，生成的 `.generated.h` 里符号对不上，链接或运行时反射就废了 。
+
+### 2. 一眼区分“谁管内存”
+- `A`/`U`：垃圾回收管，你一般不该手动 `delete`
+- `F`/`I`/`S`：传统 C++ 生命周期，栈上、智能指针、或引擎显式释放
+- 看前缀就知道 `delete` 这行代码该不该写
+
+### 3. 区分“能不能进世界”
+- `A`：能 Spawn 到关卡
+- `U`：必须挂在某个 Actor/Component 上
+- `F`：纯数据/工具，跟关卡无关
+
+### 4. 避免命名冲突 + 可读性强
+大型引擎几千个类，`FColor` 和 `AColor` 和 `UColor` 一眼分开，不用翻头文件。
+
+## 四、几个容易踩的误区
+
+> ⚠️ **F 不是“结构体专属”**：`F` 现在泛指“其他一切普通类型”，包括有虚函数、有多态、有复杂状态的类（如 `FScene`、`FRenderer`）。它最早来自 Tim Sweeney 写 `FVector` 时的 “Float” ，后来语义泛化了。
+
+> ⚠️ **I 不是 Java 式接口**：UE 的 `I` 类通常是带默认实现的抽象类，而且常配合 `UInterface` 宏做反射（C++ 层是多重继承：`public AActor, public IMyInterface`）。
+
+> ⚠️ **T 实例化后要改前缀**：`TArray<FString>` 的别名应该叫 `FStringArray`，不是 `TStringArray` 。
+
+> ⚠️ **S 只在 Slate 层**：UMG 的 `UUserWidget` 是 U 前缀，它里面包裹的 Slate 控件才是 S 前缀，两层是不同体系。
+
+## 五、一句话记忆法
+
+- **A**ctor 在场景里，**U**Object 在内存里
+- **F** 就是普通 C++ 类（Float 遗风）
+- **I** 是契约，**T** 是模板，**E** 是枚举，**S** 是界面
+- 前缀错了，UHT 先报错；就算编过，读代码的人也会先骂你
+
+**你想继续了解 UHT 的反射生成机制，还是 UE 模块系统中 `IModuleInterface` 的注册与加载流程？**
