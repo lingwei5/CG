@@ -1,46 +1,3 @@
-图形学中“噪声”是一类程序化生成的随机信号，用于模拟自然纹理、地形、云朵等。它们的数学基础并不是单一的，但也不是毫无关联。
-
-### Hash 函数是数学基础吗？
-
-不是。Hash 函数在噪声算法中主要扮演“伪随机数生成器”的角色，用来把空间坐标映射成确定性的随机值或随机梯度。它属于工程实现工具，而不是底层数学理论。没有了 hash，噪声算法依然可以用预计算的随机表或真实随机数实现；只是 hash 让程序化噪声更简洁、无需存储海量数据。
-
-### 常见噪声的数学基础
-
-**白噪声**  
-每个采样点独立同分布随机变量，没有空间相关性。功率谱平坦，是随机过程的最基础形式。
-
-**值噪声 Value Noise**  
-把空间划分成晶格，在每个格点生成一个随机值，然后用平滑插值（如 smoothstep）填充格点之间。数学基础是“采样 + 低通滤波插值”。
-
-**Perlin 噪声**  
-在晶格顶点生成随机梯度向量，用梯度和采样点到顶点的方向向量做点积，再插值加权。数学基础是晶格、随机向量场和高阶插值，目的是让噪声在格点处梯度连续，视觉上更自然。
-
-**Simplex 噪声**  
-改进了 Perlin 噪声。使用单纯形剖分空间，并通过偏斜坐标变换让采样点只对邻近的少数顶点做贡献。数学基础是单纯形、仿射变换和对称性分析，解决了 Perlin 噪声的计算复杂度和方向性伪影。
-
-**Worley 噪声（细胞噪声）**  
-在空间中随机撒点（晶格中每格随机放一个特征点），然后计算任意位置到最近几个特征点的距离。数学基础是 Voronoi 图 / 距离变换。它生成的图案像细胞或岩石纹理。
-
-**分形噪声（FBM）**  
-把不同频率、不同振幅的噪声叠加起来，形成自相似的分形信号。数学基础是分形几何和尺度不变性。常用于地形、云层和火焰效果。
-
-### 有没有统一的数学基础？
-
-严格地说，没有“同一个数学基础”。但可以把所有程序化噪声放在一个共同框架里理解：
-
-**空间随机场**：所有噪声都是定义在空间上的随机场，即一组随机变量随空间位置变化。
-
-**频域分析**：不同噪声的本质差异体现在功率谱密度上。白噪声频谱平坦；Perlin 类噪声通常是带通或低通的，能量集中在有限频率范围内。这也决定了噪声的“粗细”和自然程度。
-
-**构造范式**：绝大多数程序化噪声都遵循：
-
-1. 把空间划分成规则网格（晶格、单纯形、细胞）；
-2. 在每个格点或特征点定义随机属性（值、梯度、位置）；
-3. 用插值、点积或距离函数把这些属性扩展到连续空间；
-4. 在频域上形成平滑的带通特性，获得可调的自然表现。
-
-所以，hash 函数只是实现中用来产生随机属性的手段，而真正的数学基础是“随机场 + 空间离散化 + 滤波/插值 + 分形叠加”。它们没有统一的定理，但有统一的设计思想。
-
 // ============================================================
 // 噪声库 (Noise Library) — 程序化噪声全家桶
 // 包含：白噪声 / 值噪声 / Perlin梯度噪声 / Simplex噪声 /
@@ -87,6 +44,13 @@ float hash13(vec3 p3) {
     p3 = fract(p3 * 0.1031);
     p3 += dot(p3, p3.zyx + 31.32);
     return fract((p3.x + p3.y) * p3.z);
+}
+
+// 3D → 3D：生成 3D Worley 的特征点偏移
+vec3 hash33(vec3 p3) {
+    p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xxy + p3.yxx) * p3.zyx);
 }
 
 // 白噪声：逐像素独立随机（就是直接用哈希）
@@ -223,6 +187,79 @@ float worleyF1(vec2 p, float time) { return worleyNoise(p, time).x; }
 float worleyEdge(vec2 p, float time) {
     vec2 f = worleyNoise(p, time);
     return f.y - f.x;
+}
+
+// 反转 Worley：1-F1 → 细胞中心亮、边缘暗，鹅卵石/软组织孔洞
+float worleyInverted(vec2 p, float time) {
+    return 1.0 - worleyF1(p, time);
+}
+
+// 带细胞 ID 的 Worley：返回 vec3(F1, F2, id)
+// id 是最近特征点所在格子的哈希 → "每个细胞随机上色"的经典做法
+vec3 worleyWithId(vec2 p, float time) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float f1 = 8.0, f2 = 8.0, id = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 g = vec2(float(x), float(y));
+            vec2 o = hash22(i + g);
+            o = 0.5 + 0.5 * sin(time + 6.2831 * o);
+            float d = length(g + o - f);
+            if (d < f1) { f2 = f1; f1 = d; id = hash12(i + g); }
+            else if (d < f2) { f2 = d; }
+        }
+    }
+    return vec3(f1, f2, id);
+}
+
+// 3D Worley：体积云雕刻的经典选择（No Man's Sky / 地平线的云都用它）
+// 27 格扫描，返回 vec2(F1, F2)
+vec2 worleyNoise(vec3 p, float time) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    float f1 = 8.0, f2 = 8.0;
+    for (int z = -1; z <= 1; z++) {
+        for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+                vec3 g = vec3(float(x), float(y), float(z));
+                vec3 o = hash33(i + g);
+                o = 0.5 + 0.5 * sin(time + 6.2831 * o);
+                float d = length(g + o - f);
+                if (d < f1) { f2 = f1; f1 = d; }
+                else if (d < f2) { f2 = d; }
+            }
+        }
+    }
+    return vec2(f1, f2);
+}
+
+// Worley fBm：多倍频细胞噪声。F2-F1 叠加 → 水面焦散、云的侵蚀细节
+// 注意 Worley 作倍频时通常只扩频不缩幅太狠（细胞边界本身高频）
+float worleyFbm(vec2 p, int octaves) {
+    float value = 0.0;
+    float amp = 0.5;
+    mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+    for (int i = 0; i < octaves; i++) {
+        vec2 f = worleyNoise(p, 0.0);
+        value += amp * (f.y - f.x);
+        p = rot * p * 2.0;
+        amp *= 0.5;
+    }
+    return value;
+}
+
+// 3D Worley fBm：体积云细节层——用 F1 反转侵蚀 Perlin 基础云形
+float worleyFbm3(vec3 p, int octaves) {
+    float value = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < octaves; i++) {
+        vec2 f = worleyNoise(p, 0.0);
+        value += amp * (1.0 - f.x);
+        p *= 2.0;
+        amp *= 0.5;
+    }
+    return value;
 }
 
 // ---------- 6. Voronoi 精确边界距离 ----------
@@ -411,6 +448,23 @@ vec3 rockColor(vec2 uv, float time) {
     float crack = 1.0 - smoothstep(0.0, 0.08, border);   // 边界线
     float shade = 0.5 + 0.5 * fbm(uv * 8.0, 4);          // 表面明暗
     return mix(vec3(0.45, 0.42, 0.40) * shade, vec3(0.1), crack * 0.7);
+}
+
+// 水面焦散：Worley fBm 的招牌应用——F2-F1 的亮带模拟光线汇聚
+vec3 waterCaustics(vec2 uv, float time) {
+    vec2 p = uv * 6.0 + 0.2 * time;
+    float c = worleyFbm(p, 3);
+    float caustic = pow(smoothstep(0.35, 0.0, c), 2.0);   // 锐化亮线
+    vec3 water = vec3(0.05, 0.25, 0.35);
+    return water + vec3(0.6, 0.8, 0.7) * caustic;
+}
+
+// 细胞随机上色：worleyWithId 的 id 驱动调色板，干裂泥地/皮肤斑点
+vec3 cellPattern(vec2 uv, float time) {
+    vec3 w = worleyWithId(uv * 8.0, time);
+    vec3 tint = 0.5 + 0.5 * cos(6.2831 * w.z + vec3(0.0, 2.1, 4.2)); // id→HSV 近似
+    float edge = smoothstep(0.0, 0.15, w.x);               // 距最近点太近→变暗
+    return tint * (0.4 + 0.6 * edge);
 }
 
 // 程序化星空：稀疏白噪声做星星，fBm 做银河
