@@ -1,3 +1,197 @@
+# shadertoy noise 
+https://www.shadertoy.com/view/4sc3z2 噪声展示
+## 步骤拆解
+这段Shader代码是一个经典的Shadertoy示例，主要用于展示和对比**三维噪声**的不同生成算法及其在各种视觉效果（如云、火焰、大理石）中的应用。代码通过屏幕空间划分，将四种不同的噪声效果同时渲染出来。
+
+以下是代码逻辑的详细步骤解释：
+
+**1. 噪声算法选择与哈希函数**
+文件位置：[noise.shadertoy](shaders\noise.shadertoy)
+代码顶部通过宏定义（`Use_Perlin`、`Use_Value`、`Use_Simplex`）来切换基础噪声算法。为了生成伪随机数，代码实现了两种3D哈希函数（`hashOld33/31` 和 `hash31/33`），后者是基于更现代的整数取模法，具有更好的随机分布性。
+
+**2. 三种基础3D噪声实现**
+文件位置：[noise.shadertoy](shaders\noise.shadertoy)
+- **Value Noise (`value_noise`)**：在网格顶点上生成随机值，通过Hermite平滑插值（`w = pf * pf * (3.0 - 2.0 * pf)`）计算网格内的值。
+- **Perlin Noise (`perlin_noise`)**：在网格顶点上生成随机梯度向量（通过`hash33`），计算输入点到顶点的向量与梯度的点积，最后进行三线性插值，产生更自然的连续过渡。
+- **Simplex Noise (`simplex_noise`)**：将空间划分为单纯形（3D中为四面体）而非立方体，计算效率更高且各向同性更好。
+
+**3. 噪声分形叠加**
+文件位置：[noise.shadertoy](shaders\noise.shadertoy)
+基于基础噪声函数，代码构建了四种不同的分形叠加方式：
+- `noise_itself`：仅对基础噪声进行频率放大。
+- `noise_sum`：分形布朗运动（FBM），通过循环叠加不同频率和振幅的噪声，模拟自然界的自相似性。
+- `noise_sum_abs`：将噪声取绝对值后进行FBM，产生类似湍流的效果，常用于火焰。
+- `noise_sum_abs_sin`：在湍流噪声的基础上叠加正弦波扭曲，产生大理石般的条纹效果。
+
+**4. 颜色映射**
+文件位置：[noise.shadertoy](shaders\noise.shadertoy)
+`draw_simple`、`draw_cloud`、`draw_fire`、`draw_marble` 四个函数分别将上述四种噪声值映射到特定的RGB颜色空间，通过线性混合（`mix`）和幂函数（`pow`）调整色彩过渡，实现蓝天、云层、火焰和大理石纹理的着色。
+
+**5. 光线步进与几何映射**
+文件位置：[noise.shadertoy](shaders\noise.shadertoy)
+- `map` 函数定义了一个沿Z轴以 `SPEED` 速度移动的隐式球体（SDF）。
+- `normal` 函数利用中心差分法计算球体表面的法线。
+- `marching` 函数实现了标准的光线步进算法，从相机出发沿射线方向探测是否击中球体。若未击中，则渲染背景噪声；若击中，则渲染球体表面的噪声纹理，并加上菲涅尔边缘光效果。
+
+**6. 主图像合成与交互分割**
+文件位置：[noise.shadertoy](shaders\noise.shadertoy)
+`mainImage` 是入口函数。它根据屏幕坐标 `p` 和分割点 `split`（默认屏幕中心，可由鼠标 `iMouse` 动态控制），将屏幕分为四个象限。每个象限分别调用不同的噪声计算和绘制函数。最后，使用 `smoothstep` 绘制十字分割线和圆形轮廓，将四种效果优雅地同屏展示。
+
+## marching detail marching相关的函数详细解释每一行
+以下是对 `marching` 及其相关函数（`map`、`normal`、`getBackground`、`getColor`）的逐行详细解释。
+
+### 1. `map` 函数 (符号距离场 SDF)
+该函数定义了场景中的几何体，并返回空间中任意点到该几何体表面的最短距离。
+
+代码位置：[noise.shadertoy](shaders\noise.shadertoy#L139-L142)
+```glsl
+float map(vec3 pos)
+{
+    return length(pos - (vec3(0.0, 0.0, 1.5) + iTime * vec3(0.0, 0.0, SPEED))) - 1.0;
+}
+```
+- `float map(vec3 pos)`：接收空间中的一个坐标点 `pos`，返回一个浮点数，表示该点到场景物体表面的距离。
+- `return length(pos - (vec3(0.0, 0.0, 1.5) + iTime * vec3(0.0, 0.0, SPEED))) - 1.0;`：
+  - `vec3(0.0, 0.0, 1.5)`：球体的初始中心位置，在Z轴正方向1.5处。
+  - `iTime * vec3(0.0, 0.0, SPEED)`：随时间推移，球体在Z轴正方向上以 `SPEED` 速度移动。
+  - `pos - (...)`：计算输入点 `pos` 到移动球体中心的向量。
+  - `length(...)`：计算该向量的模长，即点到球心的距离。
+  - `- 1.0`：减去球体的半径1.0。结果为负表示在球体内部，为正表示在球体外部，为0表示恰好在球体表面。
+
+### 2. `normal` 函数 (法线计算)
+该函数利用中心差分法计算物体表面某点的法线向量。
+
+代码位置：[noise.shadertoy](shaders\noise.shadertoy#L144-L150)
+```glsl
+vec3 normal(vec3 pos) {
+    vec2 eps = vec2(0.001, 0.0);
+    return normalize(vec3(	map(pos + eps.xyy) - map(pos - eps.xyy),
+                    		map(pos + eps.yxy) - map(pos - eps.yxy),
+                         	map(pos + eps.yyx) - map(pos - eps.yyx)));
+}
+```
+- `vec3 normal(vec3 pos)`：接收物体表面的一点 `pos`，返回该点的单位法线向量。
+- `vec2 eps = vec2(0.001, 0.0);`：定义一个极小的偏移量 `eps.x = 0.001`，`eps.y = 0.0`，用于求导。
+- `return normalize(...)`：对求出的梯度向量进行归一化，使其长度为1。
+- `vec3(...)`：构造梯度向量（即法线的近似）：
+  - `map(pos + eps.xyy) - map(pos - eps.xyy)`：在X轴方向上微调 `pos`，用差分近似求X方向的偏导数（`eps.xyy` 即 `(0.001, 0.0, 0.0)`）。
+  - `map(pos + eps.yxy) - map(pos - eps.yxy)`：在Y轴方向上微调 `pos`，近似求Y方向的偏导数（`eps.yxy` 即 `(0.0, 0.001, 0.0)`）。
+  - `map(pos + eps.yyx) - map(pos - eps.yyx)`：在Z轴方向上微调 `pos`，近似求Z方向的偏导数（`eps.yyx` 即 `(0.0, 0.0, 0.001)`）。
+
+### 3. `getBackground` 函数 (背景颜色)
+当光线未击中物体时，根据屏幕坐标计算背景的噪声颜色。
+
+代码位置：[noise.shadertoy](shaders\noise.shadertoy#L152-L168)
+```glsl
+vec3 getBackground(vec2 uv, vec2 split)
+{
+    vec3 pos = vec3(uv * vec2(iResolution.x/iResolution.y, 1.0), iTime * SPEED);
+    float f;
+    if (uv.x < split.x && uv.y > split.y) {
+        f = noise_itself(pos);
+    } else if (uv.x < split.x && uv.y <= split.y) {
+        f = noise_sum(pos);
+    } else if (uv.x >= split.x && uv.y < split.y) {
+        f = noise_sum_abs(pos);
+    } else {
+        f = noise_sum_abs_sin(pos);
+    }
+    
+    return vec3(f * 0.5 + 0.5);
+}
+```
+- `vec3 pos = vec3(uv * vec2(iResolution.x/iResolution.y, 1.0), iTime * SPEED);`：将2D屏幕坐标转换为3D采样坐标，Z轴随时间增加，使背景噪声产生流动效果。乘以宽高比修正了X方向的拉伸。
+- `float f;`：声明一个变量存储噪声值。
+- `if (uv.x < split.x && uv.y > split.y)`：判断是否在左上象限，若是，使用基础噪声 `noise_itself`。
+- `else if (uv.x < split.x && uv.y <= split.y)`：判断是否在左下象限，若是，使用分形叠加噪声 `noise_sum`。
+- `else if (uv.x >= split.x && uv.y < split.y)`：判断是否在右下象限，若是，使用绝对值湍流噪声 `noise_sum_abs`。
+- `else`：右上象限，使用正弦扭曲噪声 `noise_sum_abs_sin`。
+- `return vec3(f * 0.5 + 0.5);`：将噪声值（范围约为 -1 到 1）映射到 0 到 1 的灰度颜色范围并返回。
+
+### 4. `getColor` 函数 (物体表面颜色)
+当光线击中物体时，计算该点的光照和纹理颜色。
+
+代码位置：[noise.shadertoy](shaders\noise.shadertoy#L170-L195)
+```glsl
+vec3 getColor(vec2 uv, vec3 pos, vec3 rd, vec2 split)
+{
+    vec3 nor = normal(pos);
+    vec3 light = normalize(vec3(0.5, 1.0, -0.2));
+        
+    float diff = dot(light, nor);
+    diff = diff * 0.5 + 0.5;
+    
+    vec3 col;
+    float f;
+    if (uv.x < split.x && uv.y > split.y) {
+        f = noise_itself(pos);
+        col = draw_simple(f);
+    } else if (uv.x < split.x && uv.y <= split.y) {
+        f = noise_sum(pos);
+        col = draw_cloud(f);
+    } else if (uv.x >= split.x && uv.y < split.y) {
+        f = noise_sum_abs(pos);
+        col = draw_fire(f);
+    } else {
+        f = noise_sum_abs_sin(pos);
+        col = draw_marble(f);
+    }
+    
+    vec3 edge = col * pow((1.0 - clamp(dot(nor, -rd), 0.0, 1.0)), 5.0);
+    
+    return col + edge;
+}
+```
+- `vec3 nor = normal(pos);`：计算交点处的表面法线。
+- `vec3 light = normalize(vec3(0.5, 1.0, -0.2));`：定义光源方向并归一化。
+- `float diff = dot(light, nor);`：计算兰伯特漫反射项（点乘）。
+- `diff = diff * 0.5 + 0.5;`：将漫反射结果从 [-1, 1] 映射到 [0, 1]（半兰伯特光照），使背光面也有一定亮度，过渡更柔和。
+- `if...else if...else`：与背景逻辑类似，根据屏幕象限计算不同噪声值 `f`，并调用对应的颜色映射函数（`draw_simple`, `draw_cloud`, `draw_fire`, `draw_marble`）将噪声值转换为RGB颜色 `col`。
+- `vec3 edge = col * pow((1.0 - clamp(dot(nor, -rd), 0.0, 1.0)), 5.0);`：计算菲涅尔边缘光。`dot(nor, -rd)` 是法线与视线反方向的夹角余弦，边缘处该值接近0，经过 `1.0 - ...` 和5次幂运算后，边缘处会产生高光，中心处几乎为0。
+- `return col + edge;`：返回漫反射纹理颜色与边缘光的叠加结果。
+
+### 5. `marching` 函数 (光线步进算法核心)
+该函数负责从相机发出射线，一步步探测是否与物体相交，并返回最终的颜色。
+
+代码位置：[noise.shadertoy](shaders\noise.shadertoy#L197-L215)
+```glsl
+vec3 marching(vec3 ro, vec3 rd, vec2 uv, vec2 split)
+{
+    float t = 0.0;
+    float d = 1.0;
+    vec3 pos;
+    for (int i = 0; i < 50; i++) {
+        pos = ro + rd * t;
+        d = map(pos);
+        t += d;
+        if (d < PRECISE || t > FAR) break;
+    }
+ 
+    vec3 col = getBackground(uv, split);
+    
+    if (t < FAR) {
+        pos = ro + rd * t;
+        col = getColor(uv, pos, rd, split);
+    }
+    
+    return col;
+}
+```
+- `vec3 marching(vec3 ro, vec3 rd, vec2 uv, vec2 split)`：接收射线起点 `ro`、射线方向 `rd`、屏幕坐标 `uv` 和象限分割点 `split`。
+- `float t = 0.0;`：初始化射线行进的总距离为0。
+- `float d = 1.0;`：初始化当前步长（到物体的距离）为一个非零值，以便进入循环。
+- `vec3 pos;`：声明变量记录射线当前到达的3D位置。
+- `for (int i = 0; i < 50; i++)`：限制最大步进次数为50次，防止无限循环。
+  - `pos = ro + rd * t;`：根据射线方程计算当前步进到达的3D空间坐标。
+  - `d = map(pos);`：计算当前坐标到场景物体的最短距离。
+  - `t += d;`：射线沿方向安全前进 `d` 的距离（Sphere Tracing 核心思想）。
+  - `if (d < PRECISE || t > FAR) break;`：如果距离小于精度阈值 `PRECISE`（认为击中表面），或者总距离超过最远距离 `FAR`（认为射线未击中任何东西），则跳出循环。
+- `vec3 col = getBackground(uv, split);`：默认先获取背景颜色。
+- `if (t < FAR)`：判断是否击中物体（步进总距离未超过最远限制）。
+  - `pos = ro + rd * t;`：重新计算精确的交点坐标（因为循环中最后一次 `pos` 可能略有偏差）。
+  - `col = getColor(uv, pos, rd, split);`：计算交点处的受光和纹理颜色，覆盖背景色。
+- `return col;`：返回最终计算好的像素颜色。
+
 # 噪声的数学基础及工程实现基础
 图形学中“噪声”是一类程序化生成的随机信号，用于模拟自然纹理、地形、云朵等。它们的数学基础并不是单一的，但也不是毫无关联。
 
