@@ -3033,6 +3033,155 @@ $$F_{MIS} = \sum_s \frac{1}{N_s} \sum_{i=1}^{N_s} w_s(X_{s,i}) \cdot \frac{f(X_{
 
 ---
 
+# brdf bsdf btdf bssrdf volumetric-scattering在pbrt中都是啥
+先给一张层级图，再看每个概念落在哪一层：
+
+```
+空场景（真空）
+  │
+  ├─ 表面层（2D 界面）
+  │    ├─ BRDF      同侧反射
+  │    ├─ BTDF      异侧透射
+  │    └─ BSDF      = BRDF + BTDF（接口层）
+  │
+  ├─ 次表面层（表面 + 内部薄层）
+  │    └─ BSSRDF    光进表面、内部乱窜、别处出射
+  │
+  └─ 体积层（3D participating media）
+       └─ Phase Function + σa/σs/σt + Transmittance
+```
+
+它们**不是并列关系**，是不同尺度上的散射描述。
+
+## 1. BRDF：表面单点反射
+
+**Bidirectional Reflectance Distribution Function**
+
+\[
+f_r(\omega_i,\omega_o)=\frac{dL_o(\omega_o)}{dE_i(\omega_i)}
+\]
+
+- 作用位置：表面**同一个点** \(p\)
+- 输入：入射方向 \(\omega_i\)、出射方向 \(\omega_o\)
+- 假设：光不打进物体内部，撞到微表面就立刻反弹
+- 典型材质：漫反射墙、金属、塑料、木头
+
+pbrt 里 `BRDF` 是 `BSDF` 的一部分，Cook-Torrance / GGX / Lambertian 都是它。
+
+## 2. BTDF：表面透射
+
+**Bidirectional Transmittance Distribution Function**
+
+和 BRDF 同维度，但出射方向在**表面另一侧**（折射过去）：
+
+- 输入：\(\omega_i\)（入射侧）、\(\omega_t\)（透射侧）
+- 典型材质：玻璃、水、透明塑料、毛玻璃
+- 物理上要配合 Snell 定律 + Fresnel
+
+⚠️ 常见误区：**BTDF 不是“独立完整材质”**，它和 BRDF 一起被包在 BSDF 里。一个玻璃表面同时有反射（BRDF 部分）和透射（BTDF 部分），按 Fresnel 概率分配。
+
+## 3. BSDF：表面散射的统一接口
+
+**Bidirectional Scattering Distribution Function**
+
+\[
+\text{BSDF} = \text{BRDF} \cup \text{BTDF}
+\]
+
+- pbrt 里 `BSDF` 是抽象基类/容器，运行时根据方向决定采样反射还是透射
+- 维度：4D（2D 入 + 2D 出）
+- 表面渲染方程就是：
+
+\[
+L_o=\int_{\mathcal{H}^2} f_s(\omega_i,\omega_o)L_i\cos\theta_i\,d\omega_i
+\]
+
+## 4. BSSRDF：把“表面”变厚
+
+**Bidirectional Scattering-Surface Reflectance Distribution Function**
+
+BRDF 假设“光在同一点进出”，BSSRDF 放开这个假设：
+
+\[
+S(p_o,\omega_o,p_i,\omega_i)=
+\frac{dL_o(p_o,\omega_o)}{d\Phi_i(p_i,\omega_i)}
+\]
+
+- 作用位置：**两个点** \(p_i\)（光打入点）和 \(p_o\)（光射出点）
+- 维度：8D（两点 × 两方向）
+- 物理：光进入皮肤/蜡/牛奶 → 内部多次散射 → 在别处冒出来
+- pbrt 实现：dipole diffusion approximation，常用 separable 形式 \(S=S_r(|p_o-p_i|)\cdot S_w(\omega)\) 
+
+渲染方程变成面积分 + 方向积分：
+
+\[
+L_o(p_o,\omega_o)=
+\iint_A S(p_o,\omega_o,p_i,\omega_i)L_i(p_i,\omega_i)|\cos\theta_i|\,d\omega_i\,dA
+\]
+
+⚠️ 常见误区：**BSSRDF ≠ “更高级的 BRDF”**。BRDF 是局部算子，BSSRDF 是非局部积分核；工程上 BSSRDF 通常还要额外跑一个预处理 pass 算 irradiance，不能直接塞进普通 path tracer 的 BSDF 采样循环。
+
+## 5. Volumetric Scattering：彻底离开表面
+
+到了 participating media（烟、雾、云、大气、液体内部），散射不再发生在 2D 界面，而是发生在 3D 空间的每一个微分体积元里。
+
+核心量：
+
+| 符号 | 含义 |
+|---|---|
+| \(\sigma_a\) | 吸收系数 |
+| \(\sigma_s\) | 散射系数 |
+| \(\sigma_t=\sigma_a+\sigma_s\) | 衰减/消光系数 |
+| \(\rho=\sigma_s/\sigma_t\) | 体积 albedo（散射概率） |
+| \(p(\omega,\omega')\) | phase function（体积版“BRDF”） |
+| \(T_r(p\to p')\) | beam transmittance |
+
+体积渲染方程（RTE 的积分形式）：
+
+\[
+L(p,\omega)=T_r(p_s\to p)L(p_s,-\omega)
++\int_0^{t_s} T_r(p'\to p)\,\sigma_t(p')L_s(p',\omega)\,dt
+\]
+
+其中 source term：
+
+\[
+L_s(p,\omega)=L_e(p,\omega)+\sigma_s(p)\int_{S^2}p(\omega,\omega_i)L_i(p,\omega_i)\,d\omega_i
+\]
+
+几个关键点：
+
+- **phase function 类比 BRDF**，但：
+  - 没有 \(\cos\theta\)（因为是 radiance 对 radiance，不是 irradiance）
+  - 归一化条件是 \(\int p\,d\omega=1\)，本质是概率分布
+  - 常用 Henyey-Greenstein，参数 \(g\) 控制前向/后向散射
+- **beam transmittance** 负责“光在介质里飞的时候剩多少”
+- **albedo** 在这里是“撞到粒子后继续散射的概率”，不是表面颜色
+
+## 6. 它们在 pbrt 里的工程归属
+
+| 概念 | pbrt 模块 | 采样对象 |
+|---|---|---|
+| BRDF/BTDF | `BSDF` 体系 | 表面交点处采样新方向 |
+| BSSRDF | `BSSRDF` + `DipoleSubsurfaceIntegrator` | 采样表面上的入射点 \(p_i\) |
+| Volumetric | `Volume` / `GridDensityMedium` 等 | 沿射线采样交互点 \(t\)，再按 phase function 转方向 |
+
+路径追踪时：
+
+- 撞到不透明表面 → 用 BSDF
+- 撞到半透明材质 → BSDF + BSSRDF
+- 射线在介质里飞 → 先按 \(\sigma_t\) 采样下一个交互点，再按 \(\rho\) 决定吸收/散射，散射方向由 phase function 给
+
+## 7. 一句话区分
+
+- **BRDF**：光在表面同一点弹开
+- **BTDF**：光穿表面到另一边
+- **BSDF**：上面俩的统称
+- **BSSRDF**：光钻进表面内部，逛一圈再从别处出来
+- **Volumetric scattering**：根本没有“表面”，整团空间都在吸收/发射/散射
+
+**概念层级已经理清，接下来可以把理论落到可执行层面：**
+
 # PBR工具
 首先是UE Unity Blender等引擎
 
