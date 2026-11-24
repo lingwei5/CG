@@ -1,3 +1,4 @@
+https://thebookofshaders.com/ 是带讲解及数学原理的shadertoy 按照书的流程来学习shadertoy
 # Shadertoy 使用指南：常用函数与变量详解
 
 ## 一、Shadertoy 基础介绍
