@@ -28,4 +28,6 @@ https://github.com/sharjith/ModelViewer-Qt5 qt3d模型查看器 assimp及pbr渲�
 
 post-process https://github.com/QianMo/X-PostProcessing-Library
 
-https://github.com/killop/anything_about_game 游戏开发的必知必会项
+https://github.com/killop/anything_about_game 游戏开发的必知必会项 这个主要是一些库级别的资料
+
+https://iquilezles.org/articles/  这个主要是一些小算法 小函数的实现 比较等

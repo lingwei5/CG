@@ -1,4 +1,7 @@
 https://thebookofshaders.com/ 是带讲解及数学原理的shadertoy 按照书的流程来学习shadertoy
+
+shadertoy里，Image就是内置的主shader,它的输入可以使用iChannel0 1 2 3 四个texture，这四个texture可以通过单击选择输入，如果选择了Buffer x，则通过写Buffer x的着色代码程序化绘制(RTT功能)，
+
 # Shadertoy 使用指南：常用函数与变量详解
 
 ## 一、Shadertoy 基础介绍

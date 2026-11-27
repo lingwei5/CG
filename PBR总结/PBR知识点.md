@@ -3190,6 +3190,147 @@ L_s(p,\omega)=L_e(p,\omega)+\sigma_s(p)\int_{S^2}p(\omega,\omega_i)L_i(p,\omega_
 https://github.com/derkreature/IBLBaker
 https://github.com/dariomanesku/cmftStudio
 
+# volume rendering
+
+## 15.1 equation of transfer
+![alt text](路径的数学表示.png)
+这段内容出自《物理基础渲染（PBRT）》中关于**参与介质渲染（Volume Rendering）**与光传输方程的理论推导。结合之前提到的笛卡尔积概念，这两个公式用于形式化地定义**光传输路径空间**。
+
+以下是这两个公式的具体含义与物理意义：
+
+### 1. 符号与背景铺垫
+- **$n$**：光传输路径的长度（即路径上包含的顶点/事件总数）。
+- **$A$**：2D 表面位置集合（代表光线与物体表面的交点）。
+- **$V$**：3D 介质位置集合（代表光线在参与介质如雾、烟、水中的散射点）。
+- **$\mathbf{c}$**：一个长度为 $n$ 的**二进制配置向量**（例如 $\mathbf{c} = (0, 1, 0)$）。
+- **$\mathbf{c}_i$**：向量 $\mathbf{c}$ 的第 $i$ 个元素，值为 0 或 1。
+
+### 2. 第一个公式：特定配置下的路径集合
+$$ \mathrm{P}_n^\mathbf{c} = \bigtimes_{i=1}^n \begin{cases} A, & \text{if } \mathbf{c}_i = 0 \\ V, & \text{if } \mathbf{c}_i = 1 \end{cases} $$
+
+**数学含义**：
+这是 $n$ 个集合的**笛卡尔积**。它根据配置向量 $\mathbf{c}$ 的指示，将第 $i$ 个位置限定为表面集合 $A$ 或介质集合 $V$，从而生成所有特定排列组合的路径。
+
+**物理意义**：
+在光线追踪中，一条路径是由一系列的“散射事件”组成的。这个公式计算的是：**在给定了一种特定的表面/介质混合排列模式（配置向量 $\mathbf{c}$）下，所有可能路径的集合**。
+- 例子：假设 $n=3$，配置向量 $\mathbf{c} = (0, 1, 0)$。
+- 第1个点是表面（$0 \to A$），第2个点是介质（$1 \to V$），第3个点是表面（$0 \to A$）。
+- 公式展开即为 $A \times V \times A$。它表示所有“表面 $\to$ 介质 $\to$ 表面”的三顶点光路组合。
+
+### 3. 第二个公式：所有长度为 $n$ 的路径集合
+$$ \mathrm{P}_n = \bigcup_{\mathbf{c} \in \{0,1\}^n} \mathrm{P}_n^\mathbf{c} $$
+
+**数学含义**：
+- $\{0,1\}^n$ 表示所有长度为 $n$ 的可能的二进制配置向量 $\mathbf{c}$ 的集合（总共有 $2^n$ 种）。
+- $\bigcup$ 表示集合的**并集**。
+- 公式意思是：把所有 $2^n$ 种可能的配置向量所对应的路径集合全部合并在一起。
+
+**物理意义**：
+光线在场景中传输时，它可能完全在表面之间反弹，也可能中途穿过介质发生散射。这个公式表示：**将所有可能的事件序列组合（表面或介质）产生的路径全部加起来，得到长度为 $n$ 的完整光路空间**。
+- 例子：当 $n=2$ 时，配置向量有 4 种：$(0,0), (0,1), (1,0), (1,1)$。
+- 公式将所有这些情况的路径集合取并集：$P_2 = (A \times A) \cup (A \times V) \cup (V \times A) \cup (V \times V)$。这涵盖了表面到表面、表面到介质、介质到表面、介质到介质的所有两顶点光路。
+
+### 总结
+在渲染方程中，为了计算光照，需要对所有光路进行积分。这两个公式用严谨的数学语言（笛卡尔积与并集）构建了**混合了表面交互与体积散射的积分路径空间**：先通过笛卡尔积定义单一模式的路径组合，再通过并集将所有模式汇总为完整的路径集合。
+
+
+## 15章结合代码看
+第15章读起来“不知道在干啥”是很正常的——它不是一节一个独立知识点，而是**围着一条光线在参与介质里的生命周期拆成了数学、采样、积分器三摊**。单看书本片段确实散，但**结合代码看会立刻通**，只是要有正确的切法，别从头啃到尾。
+
+## 先给你一个结论式的读法
+
+**不要按章节顺序读，按“一条相机光线怎么走完”来读**。第15章的官方定位就是：先给方程传输（equation of transfer）→ 再给介质采样构件 → 最后用 `VolPathIntegrator` 把 `PathIntegrator` 扩展成能处理参与介质的版本。你贴的那段 `Volumetric Light Transport` 正好是最后一步的收口。
+
+所以正确的顺序是**倒着读**：
+
+1. `integrators/volpath.cpp` 的 `Li()` —— 看主循环
+2. `media.h/cpp` 的 `Medium::Sample()` —— 看“这一步是撞表面还是在介质里散射”
+3. `phase.h` 的 `Sample_p()` —— 看介质里往哪个方向弹
+4. `integrator.cpp` 的 `EstimateDirect()` / `UniformSampleOneLight()` —— 看直接光照怎么算
+5. 最后才回头补 15.1 的方程传输、15.2 的采样推导、15.4/15.5 的 BSSRDF
+
+## 数学骨架（先立这个，代码才不飘）
+
+普通路径追踪里，两点之间是**要么挡住要么没挡住**；有介质后变成连续衰减。核心就是这一条：
+
+$$L_i(p,\omega) = \underbrace{T_r(p_o \to p)L_o(p_o,-\omega)}_{\text{打到表面的项}} + \underbrace{\int_0^{t_{\max}} T_r(p' \to p)L_s(p',-\omega)\,dt'}_{\text{介质里某点散射来的项}}$$
+
+其中 $T_r = \exp\left(-\int \sigma_t\,dt\right)$ 是 Beer 定律的透射率，$\sigma_t = \sigma_a + \sigma_s$。
+
+`Medium::Sample()` 干的事就是**对上面这个积分做一次重要性采样**，二选一：
+
+- 没采到介质事件 → 走表面项，返回权重 $\dfrac{T_r}{p_{surf}}$
+- 采到介质事件（距离 $t$）→ 走介质项，返回权重 $\dfrac{\sigma_s \cdot T_r}{p_t(t)}$，并把 `MediumInteraction` 填上
+
+**这里是全章最容易懵的点**：`Medium::Sample()` 不像 `BSDF::Sample_f()` 那样分开返回 `f` 和 `pdf`，它直接返回一个 **Spectrum 权重**（把透射率、$\sigma_s$、采样密度全乘一起了）。你看代码时会觉得“函数值呢？pdf 呢？”——答案是**故意不给你**，异质介质要用比值优化。
+
+## 对着 `volpath.cpp` 的 `Li()` 走一遍
+
+每一跳的结构是这样的（和你贴的原文完全对应）：
+
+```
+ray 出发
+  ├─ 先和场景求交 → 拿到可能的 surface hit（记 tMax）
+  ├─ Medium::Sample(ray, ..., &mi)
+  │     ├─ mi.IsValid() == false → 这一跳落在表面上
+  │     │     └─ UniformSampleOneLight(it, ...)   // 直接光
+  │     │     └─ it.bsdf.Sample_f()               // 采样下一方向
+  │     │     └─ beta *= bsdf::f * cos / pdf      // 表面项吞吐累乘
+  │     │
+  │     └─ mi.IsValid() == true  → 这一跳落在介质里
+  │           └─ UniformSampleOneLight(mi, ...)   // 直接光，内部用 Sample_p
+  │           └─ mi.phase->Sample_p(wo, &wi, p)   // 相位函数采样
+  │           └─ beta *= Spectrum(p)              // ⚠️ 不再乘 f*cos/pdf
+  │                                                //   因为 Sample() 已经把权重吞了
+  └─ spawn 新 ray，继续
+```
+
+**三个和 `PathIntegrator` 的关键差异**，盯住这三点代码就活了：
+
+1. **介质顶点不乘 cosine**。相位函数是各向同性/各向异性概率密度，没有 $|cos\theta|$ 这一项。
+2. **`beta` 的更新方式不同**。表面顶点是 `beta *= f * cos / pdf`；介质顶点直接 `beta *= Medium::Sample()` 的返回值。
+3. **直接光照的可见性从 `Unoccluded()` 换成 `Tr()`**。原来光源到顶点只要判断挡没挡，现在要算一路的透射率谱值。
+
+## 采样那块单独拎出来看
+
+`HomogeneousMedium::Sample()` 是全章最好读的入口：
+
+```cpp
+int channel = min((int)(sampler.Get1D() * nSamples), nSamples-1);
+Float dist  = -log(1 - sampler.Get1D()) / sigma_t[channel];  // 指数分布逆变换
+Float t     = min(dist * ray.d.Length(), ray.tMax);
+bool sampledMedium = t < ray.tMax;
+Spectrum Tr = Exp(-sigma_t * t * ray.d.Length());
+Spectrum density = sampledMedium ? sigma_t * Tr : Tr;
+```
+
+就这十行把 15.2 一整节的推导落地了：**指数分布的逆变换采样 + 超过 tMax 就退化成表面项**。RGB 三通道 $\sigma_t$ 不一样，所以先随机挑一个通道决定距离，再用三通道各自的 `Tr` 算权重——这是谱渲染的经典处理。
+
+异质介质（`GridDensityMedium`）的 delta tracking / ratio tracking 先跳过，等 homogeneous 吃透了再看，不然容易陷在 MIS 权重里出不来。
+
+## 几个实操技巧
+
+- **关掉介质跑一遍，再打开跑一遍**。同一场景 `Integrator "path"` vs `Integrator "volpath"`，diff 一下输出，你会看到图像只差在雾/烟区域——这就是第15章全部新增的东西。
+- **`maxdepth` 拉到 1 / 3 / 20 各渲一张**。多重散射的贡献一眼就看出来，比读公式快。
+- **打断点看 `MediumInteraction::IsValid()`**。它就是 `phase != nullptr`，整个积分器的分支全靠这一个布尔。
+- **别一上来读 BSSRDF（15.4/15.5）**。那节虽然放在这章，但它是拿 `VolPathIntegrator` 当工具去解次表面散射，属于应用不是主线。
+
+## 常见误区（这几个坑很多人踩）
+
+> ⚠️ **把相位函数当 BRDF 用**。相位函数 $p(\omega_i,\omega_o)$ 已经是 PDF，采样返回值本身就是概率密度，**不要再除一次 pdf**，也没有 cos 项。
+>
+> ⚠️ **把 `Tr()` 当成 0/1 遮挡**。`VisibilityTester::Tr()` 返回 Spectrum，是连续衰减；`Unoccluded()` 才是布尔。混用会导致介质场景亮度全错。
+>
+> ⚠️ **距离采样 PDF 和方向采样 PDF 混在一起**。$p_t(t)$ 管“在哪散射”，$p(\omega_i,\omega_o)$ 管“往哪弹”，两个独立，MIS 时别乘错。
+>
+> ⚠️ **先去啃 dense medium 的优化分支**。书里提到稠密介质应该先采介质再求交，那是性能陷阱不是理解主线，最后再看。
+
+---
+
+一句话收束：**第15章 = 第14章的路径追踪 + 把“线段”从“直线可见性”升级成“指数衰减 + 中途可能散射”**。抓住这一句，再对着 `volpath.cpp` 的 `Li()` 单步走，比顺着书读快三倍。
+
+**你想先把 `volpath.cpp` 的 `Li()` 主循环，还是 `HomogeneousMedium::Sample()` 逐行拆开讲？**
+
 # TODO
 
 1. pbr理论到编辑器里的各种参数是怎么对应的 原理 各种资料都应该放到pbr总结里，之前放的很混乱 cgsummary里也有一些
